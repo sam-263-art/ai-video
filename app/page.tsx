@@ -209,7 +209,7 @@ export default function Home() {
 
           {modeBarOpen && (
             <span style={{ fontSize: 13, fontWeight: 600 }}>
-              灵感之动
+              灵感之
             </span>
           )}
         </div>
