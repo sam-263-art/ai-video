@@ -12,7 +12,7 @@ interface HistoryItem {
 }
 
 const PROMPT_TEMPLATES = [
-  { label: "AI小姐姐", prompt: "一位美丽的AI少女，长发飘逸，穿着优雅，在樱花树下微笑，电影级光影，4K超清，浅景深" },
+  { label: "AI小姐姐", prompt: "一位美丽的AI少女，长发飘逸，穿着优雅，在樱花树下微笑，电影级光影，浅景深" },
   { label: "萌宠视频", prompt: "一只可爱的橘猫在阳光照耀的草地上奔跑嬉戏，毛发细节清晰，慢镜头，温暖色调" },
   { label: "风景航拍", prompt: "无人机俯拍壮观山脉云海，晨曦光芒穿透云层，航拍视角，史诗级画面，超广角" },
   { label: "产品广告", prompt: "高端香水瓶在镜面台上旋转，水珠四溅，丁达尔光效，商业广告级别，极致细节" },
@@ -209,7 +209,7 @@ export default function Home() {
 
           {modeBarOpen && (
             <span style={{ fontSize: 13, fontWeight: 600 }}>
-              灵感之
+              灵感之动
             </span>
           )}
         </div>
