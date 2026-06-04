@@ -1,0 +1,48 @@
+import { NextResponse } from "next/server";
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+
+    const createResponse = await fetch(
+      "https://api.vidu.cn/ent/v2/text2video",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${process.env.VIDU_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: body.model || "viduq3-pro",
+          style: "general",
+          prompt: body.prompt,
+          duration: body.duration || 5,
+          seed: 0,
+          aspect_ratio: body.aspect_ratio || "16:9",
+          resolution: body.resolution || "540p",
+          movement_amplitude: "auto",
+          off_peak: false,
+        }),
+      }
+    );
+
+    const createResult = await createResponse.json();
+    console.log("创建任务:", createResult);
+
+    const taskId = createResult.task_id || createResult.id;
+
+    if (!taskId) {
+      return NextResponse.json(
+        { error: "没有获取到 task_id" },
+        { status: 500 }
+      );
+    }
+
+    // 直接返回 task_id，不再轮询
+    return NextResponse.json({ task_id: taskId });
+
+  } catch (error: any) {
+    console.error(error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
