@@ -8,7 +8,7 @@ export async function GET(
     const { id: taskId } = await params; 
    
     const taskResponse = await fetch(
-      `https://api.vidu.cn/ent/v2/tasks/${taskId}/creations`,
+      `https://api.vidu.com/ent/v2/tasks/${taskId}/creations`,
       {
         method: "GET",
         headers: {

@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     };
 
     if (mode === "text2video" || mode === "extend") {
-      apiUrl = "https://api.vidu.cn/ent/v2/text2video";
+      apiUrl = "https://api.vidu.com/ent/v2/text2video";
       apiBody = {
         ...common,
         style: "general",
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       };
     } else if (mode === "img2video" || mode === "product" || mode === "talking") {
       const imageUrl = await uploadToImgbb(body.first_frame);
-      apiUrl = "https://api.vidu.cn/ent/v2/img2video";
+      apiUrl = "https://api.vidu.com/ent/v2/img2video";
       apiBody = {
         ...common,
         prompt: body.prompt,
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     } else if (mode === "firstlast") {
       const firstUrl = await uploadToImgbb(body.first_frame);
       const lastUrl = await uploadToImgbb(body.last_frame);
-      apiUrl = "https://api.vidu.cn/ent/v2/img2video";
+      apiUrl = "https://api.vidu.com/ent/v2/img2video";
       apiBody = {
         ...common,
         prompt: body.prompt,
