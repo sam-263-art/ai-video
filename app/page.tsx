@@ -13,21 +13,58 @@ interface HistoryItem {
   timestamp: string;
 }
 
+// Legacy – kept for backward compat
 interface CharacterCard {
   id: string;
   name: string;
-  imageBase64: string;   // data URL
-  styleDesc: string;     // 角色画风描述词前缀
+  imageBase64: string;
+  styleDesc: string;
 }
 
-interface MangaScene {
+// ── New manga types ──
+
+interface MangaScript {
+  title: string;
+  genre: string;
+  synopsis: string;
+  characters: { name: string; role: string; appearance: string }[];
+  scenes: { index: number; title: string; content: string }[];
+}
+
+interface StoryboardPanel {
   id: string;
-  prompt: string;
-  status: TaskStatus;
-  progress: number;
+  index: number;
+  title: string;
+  sceneDescription: string;
+  location: string;
+  camera: string;
+  duration: number;
+  transition: string;
+  dialog: string;
+  mood: string;
+  // AI-generated prompts
+  characterPrompt: string;
+  scenePrompt: string;
+  panelImagePrompt: string;
+  videoPrompt: string;
+  // Generated assets
+  panelImageUrl: string;
   videoUrl: string;
-  errorMsg: string;
+  // Status
+  imageStatus: "idle" | "generating" | "done" | "error";
+  videoStatus: TaskStatus;
+  videoProgress: number;
   taskId: string;
+  errorMsg: string;
+}
+
+interface CharacterAsset {
+  prompt: string;
+  consistencyKey: string;
+  imageUrl: string;
+  isGeneratingPrompt: boolean;
+  isGeneratingImage: boolean;
+  imageError: string;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -42,24 +79,26 @@ const PROMPT_TEMPLATES = [
   { label: "汽车展示", prompt: "豪华跑车在山路上疾驰，车身反光细腻，运动镜头追拍，夕阳逆光，震撼视觉冲击" },
 ];
 
-// 漫剧风格预设
 const MANGA_STYLES = [
   { label: "日漫线稿", desc: "anime style, clean line art, cel shading, vibrant colors" },
   { label: "国风水墨", desc: "Chinese ink painting style, elegant brushwork, muted tones, poetic atmosphere" },
-  { label: "赛璐璐", desc: "classic anime cel animation, bold outlines, flat colors, retro aesthetic" },
-  { label: "写实风", desc: "cinematic realistic style, film lighting, detailed textures, 4K quality" },
+  { label: "赛璐璐",   desc: "classic anime cel animation, bold outlines, flat colors, retro aesthetic" },
+  { label: "写实风",   desc: "cinematic realistic style, film lighting, detailed textures, 4K quality" },
   { label: "古风仙侠", desc: "ancient Chinese fantasy, flowing robes, mystical light effects, ethereal atmosphere" },
   { label: "都市恋爱", desc: "modern urban romance, soft lighting, warm tones, cinematic shallow depth of field" },
+  { label: "3D渲染",   desc: "3D CG rendered, Unreal Engine 5 quality, volumetric lighting, movie quality" },
+  { label: "3D动漫",  },
 ];
 
-// 漫剧剧情模板
+const MANGA_GENRES = ["都市言情", "古风仙侠", "校园青春", "奇幻冒险", "悬疑惊悚", "日常温情", "热血战斗"];
+
 const MANGA_PLOT_TEMPLATES = [
-  { label: "霸总初遇", plot: "霸道总裁在咖啡厅与平凡女主偶然相遇，眼神交汇，心动一刻" },
-  { label: "古风重逢", plot: "离别多年的两人在繁华集市重逢，百感交集，欲言又止" },
-  { label: "修仙突破", plot: "主角在山顶盘坐冥想，突然天地异象，成功突破瓶颈，灵气环绕" },
-  { label: "校园告白", plot: "男主在操场夕阳下鼓起勇气向女主表白，女主羞涩转身" },
-  { label: "对决时刻", plot: "两位高手在废墟中对峙，气氛剑拔弩张，决战即将开始" },
-  { label: "温情日常", plot: "一对情侣在家做饭，笑声不断，阳光透过窗户洒进来" },
+  { label: "霸总初遇",  plot: "霸道总裁在咖啡厅与平凡女主偶然相遇，眼神交汇，心动一刻" },
+  { label: "古风重逢",  plot: "离别多年的两人在繁华集市重逢，百感交集，欲言又止" },
+  { label: "修仙突破",  plot: "主角在山顶盘坐冥想，突然天地异象，成功突破瓶颈，灵气环绕" },
+  { label: "校园告白",  plot: "男主在操场夕阳下鼓起勇气向女主表白，女主羞涩转身" },
+  { label: "对决时刻",  plot: "两位高手在废墟中对峙，气氛剑拔弩张，决战即将开始" },
+  { label: "温情日常",  plot: "一对情侣在家做饭，笑声不断，阳光透过窗户洒进来" },
 ];
 
 const MODES = [
@@ -75,78 +114,73 @@ const CREDITS: Record<string, number> = { "540p": 9, "720p": 20, "1080p": 24 };
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Home() {
-  // ── 普通模式 state ──
-  const [activeNav, setActiveNav] = useState("generate");
-  const [prompt, setPrompt] = useState("");
-  const [aspectRatio, setAspectRatio] = useState("16:9");
-  const [duration, setDuration] = useState(5);
-  const [resolution, setResolution] = useState("540p");
-  const [model, setModel] = useState("viduq3-pro");
-  const [frameMode, setFrameMode] = useState("text2video");
-  const [firstFrame, setFirstFrame] = useState<File | null>(null);
+  // ── 普通模式 state ──────────────────────────────────────────────────────
+  const [activeNav, setActiveNav]           = useState("generate");
+  const [prompt, setPrompt]                 = useState("");
+  const [aspectRatio, setAspectRatio]       = useState("16:9");
+  const [duration, setDuration]             = useState(5);
+  const [resolution, setResolution]         = useState("540p");
+  const [model, setModel]                   = useState("viduq3-pro");
+  const [frameMode, setFrameMode]           = useState("text2video");
+  const [firstFrame, setFirstFrame]         = useState<File | null>(null);
   const [firstFramePreview, setFirstFramePreview] = useState("");
-  const [lastFrame, setLastFrame] = useState<File | null>(null);
-  const [lastFramePreview, setLastFramePreview] = useState("");
-  const [isEnhancing, setIsEnhancing] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [modeBarOpen, setModeBarOpen] = useState(true);
-  const [status, setStatus] = useState<TaskStatus>("idle");
-  const [progress, setProgress] = useState(0);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [currentTaskId, setCurrentTaskId] = useState("");
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [videoChain, setVideoChain] = useState<string[]>([]);
-  const [isExtending, setIsExtending] = useState(false);
+  const [lastFrame, setLastFrame]           = useState<File | null>(null);
+  const [lastFramePreview, setLastFramePreview]   = useState("");
+  const [isEnhancing, setIsEnhancing]       = useState(false);
+  const [showTemplates, setShowTemplates]   = useState(false);
+  const [modeBarOpen, setModeBarOpen]       = useState(true);
+  const [status, setStatus]                 = useState<TaskStatus>("idle");
+  const [progress, setProgress]             = useState(0);
+  const [videoUrl, setVideoUrl]             = useState("");
+  const [currentTaskId, setCurrentTaskId]   = useState("");
+  const [history, setHistory]               = useState<HistoryItem[]>([]);
+  const [errorMsg, setErrorMsg]             = useState("");
+  const [videoChain, setVideoChain]         = useState<string[]>([]);
+  const [isExtending, setIsExtending]       = useState(false);
 
-  // ── 漫剧模式 state ──
-  const [isMangaMode, setIsMangaMode] = useState(false);
-  const [mangaStep, setMangaStep] = useState(1);           // 1=剧情 2=角色 3=生成
-  const [mangaPlot, setMangaPlot] = useState("");           // 用户输入的一句剧情
-  const [mangaStyle, setMangaStyle] = useState(MANGA_STYLES[0]);
-  const [mangaScenes, setMangaScenes] = useState<MangaScene[]>([]); // 分镜列表
-  const [isExpandingPlot, setIsExpandingPlot] = useState(false);
-  const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
-  const [characters, setCharacters] = useState<CharacterCard[]>([]);
-  const [showAddChar, setShowAddChar] = useState(false);
-  const [newCharName, setNewCharName] = useState("");
-  const [newCharStyle, setNewCharStyle] = useState("");
-  const [newCharPreview, setNewCharPreview] = useState("");
-  const [newCharBase64, setNewCharBase64] = useState("");
-  const [mangaGenerating, setMangaGenerating] = useState(false);
+  // ── 漫剧模式 state ──────────────────────────────────────────────────────
+  const [isMangaMode, setIsMangaMode]       = useState(false);
+  const [mangaStep, setMangaStep]           = useState(1);  // 1-4
+  const [mangaStyle, setMangaStyle]         = useState(MANGA_STYLES[0]);
+  const [mangaGenre, setMangaGenre]         = useState("都市言情");
+
+  // Step 1 – Script
+  const [mangaPlotInput, setMangaPlotInput]     = useState("");
+  const [generatedScript, setGeneratedScript]   = useState<MangaScript | null>(null);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [scriptError, setScriptError]           = useState("");
+
+  // Step 2 – Storyboard
+  const [storyboardPanels, setStoryboardPanels]         = useState<StoryboardPanel[]>([]);
+  const [isGeneratingStoryboard, setIsGeneratingStoryboard] = useState(false);
+
+  // Step 3 – Assets
+  const [characterAssets, setCharacterAssets]   = useState<Record<string, CharacterAsset>>({});
+  const [isGeneratingAllImages, setIsGeneratingAllImages] = useState(false);
+  const [uploadingCharName, setUploadingCharName] = useState<string | null>(null);
+  const charUploadRef = useRef<HTMLInputElement>(null);
+
+  // Step 4 – Video
+  const [mangaGenerating, setMangaGenerating]   = useState(false);
 
   const firstFrameRef = useRef<HTMLInputElement>(null);
-  const lastFrameRef = useRef<HTMLInputElement>(null);
-  const charImageRef = useRef<HTMLInputElement>(null);
+  const lastFrameRef  = useRef<HTMLInputElement>(null);
 
-  // ── 普通模式计算 ──
-  const currentMode = MODES.find(m => m.value === frameMode)!;
-  const needsImage = currentMode.needsImage;
+  // ── Derived ──────────────────────────────────────────────────────────────
+  const currentMode    = MODES.find(m => m.value === frameMode)!;
+  const needsImage     = currentMode.needsImage;
   const estimatedCredits = duration * (CREDITS[resolution] ?? 9);
-  const estimatedTime = duration <= 5 ? "1~2 分钟" : duration <= 10 ? "2~3 分钟" : "3~5 分钟";
-  const isGenerating = ["creating", "queueing", "processing"].includes(status);
-  const canGenerate = !isGenerating && prompt.trim() && (!needsImage || firstFrame);
+  const estimatedTime  = duration <= 5 ? "1~2 分钟" : duration <= 10 ? "2~3 分钟" : "3~5 分钟";
+  const isGenerating   = ["creating", "queueing", "processing"].includes(status);
+  const canGenerate    = !isGenerating && prompt.trim() && (!needsImage || firstFrame);
 
   const statusLabel: Record<TaskStatus, string> = {
     idle: "", creating: "正在创建任务…", queueing: "排队等待中…",
     processing: `生成中 ${progress}%`, success: "生成完成", failed: "生成失败",
   };
 
-  // ── 从 localStorage 加载角色库 ──
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("manga_characters");
-      if (saved) setCharacters(JSON.parse(saved));
-    } catch {}
-  }, []);
-
-  function saveCharacters(chars: CharacterCard[]) {
-    setCharacters(chars);
-    try { localStorage.setItem("manga_characters", JSON.stringify(chars)); } catch {}
-  }
-
   // ─────────────────────────────────────────────────────────────────────────
-  // 普通模式工具函数（保持原有逻辑不变）
+  // 普通模式工具函数
   // ─────────────────────────────────────────────────────────────────────────
 
   async function toBase64(file: File): Promise<string> {
@@ -162,6 +196,24 @@ export default function Home() {
       };
       img.src = url;
     });
+  }
+
+  // ★ 辅助：把任意图片 URL（http/data:URL）转为 base64 data URL
+  // Vidu img2video 接口只接受 base64，直接传 http URL 会静默失败
+  async function urlToBase64(url: string): Promise<string | null> {
+    try {
+      if (url.startsWith("data:")) return url; // 已经是 base64
+      const res = await fetch(url);
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result as string);
+        reader.onerror = () => reject(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
   }
 
   async function enhancePrompt() {
@@ -183,15 +235,13 @@ export default function Home() {
     setLastFrame(file); setLastFramePreview(URL.createObjectURL(file));
   }
   function clearFirstFrame() { setFirstFrame(null); setFirstFramePreview(""); if (firstFrameRef.current) firstFrameRef.current.value = ""; }
-  function clearLastFrame() { setLastFrame(null); setLastFramePreview(""); if (lastFrameRef.current) lastFrameRef.current.value = ""; }
+  function clearLastFrame()  { setLastFrame(null); setLastFramePreview(""); if (lastFrameRef.current)  lastFrameRef.current.value = ""; }
 
   async function generateVideo(extendFromUrl?: string) {
     if (!extendFromUrl && !prompt.trim()) return;
     setStatus("creating"); setProgress(0); setErrorMsg("");
     try {
-      const MODE_MAP: Record<string, number> = {
-        "text2video": 1, "img2video": 2, "firstlast": 3, "talking": 4, "product": 5, "extend": 6
-      };
+      const MODE_MAP: Record<string, number> = { text2video: 1, img2video: 2, firstlast: 3, talking: 4, product: 5, extend: 6 };
       const body: any = {
         prompt: extendFromUrl ? prompt + "，继续上一个镜头，保持风格连贯" : prompt,
         aspect_ratio: aspectRatio, duration, resolution,
@@ -212,20 +262,21 @@ export default function Home() {
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 5000));
       try {
-        const res = await fetch(`/api/task/${id}`);
+        const res  = await fetch(`/api/task/${id}`);
         const data = await res.json();
         if (data.progress) setProgress(Math.round(data.progress));
-        if (data.state === "queueing") setStatus("queueing");
-        if (data.state === "processing") setStatus("processing");
+        if (data.state === "queueing")    setStatus("queueing");
+        if (data.state === "processing")  setStatus("processing");
         if (data.state === "success") {
-          const url = data.creations?.[0]?.url || data.creations?.[0]?.video_url || data.video_url || "";
+          const url = data.creations?.[0]?.url || "";
           setVideoUrl(url); setStatus("success");
-          if (isExtension) { setVideoChain(p => [...p, url]); setIsExtending(false); } else { setVideoChain([url]); }
+          if (isExtension) { setVideoChain(p => [...p, url]); setIsExtending(false); }
+          else             { setVideoChain([url]); }
           setHistory(p => [{ id: Date.now().toString(), prompt: prompt.slice(0, 40) + (prompt.length > 40 ? "…" : ""), videoUrl: url, timestamp: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) }, ...p.slice(0, 9)]);
           return;
         }
         if (data.state === "failed") { setStatus("failed"); setErrorMsg("视频生成失败"); setIsExtending(false); return; }
-      } catch (e) { /* continue */ }
+      } catch { /* continue */ }
     }
     setStatus("failed"); setErrorMsg("生成超时，请重试"); setIsExtending(false);
   }
@@ -240,195 +291,389 @@ export default function Home() {
   // 漫剧模式函数
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Step1: 用 Claude 把一句剧情扩展为3个分镜描述词
-  async function expandMangaPlot() {
-    if (!mangaPlot.trim()) return;
-    setIsExpandingPlot(true);
+  // Step 1: Generate full script
+  async function generateScript() {
+    if (!mangaPlotInput.trim()) return;
+    setIsGeneratingScript(true);
+    setScriptError("");
     try {
       const res = await fetch("/api/enhance", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: mangaPlot, mode: "manga_scenes" }),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: mangaPlotInput, mode: "manga_script", style: mangaStyle.label, genre: mangaGenre }),
       });
       const data = await res.json();
-      if (data.scenes && data.scenes.length > 0) {
-        // 把分镜描述词加上角色一致性前缀和风格描述
-        const char = characters.find(c => c.id === selectedCharId);
-        const charPrefix = char ? `${char.styleDesc}，` : "";
-        const stylePrefix = mangaStyle.desc + "，";
-        const scenes: MangaScene[] = data.scenes.map((s: string, i: number) => ({
-          id: `scene-${Date.now()}-${i}`,
-          prompt: stylePrefix + charPrefix + s,
-          status: "idle" as TaskStatus,
-          progress: 0,
-          videoUrl: "",
-          errorMsg: "",
-          taskId: "",
-        }));
-        setMangaScenes(scenes);
-        setMangaStep(3);
+      if (data.error) throw new Error(data.error);
+      if (!data.title || !data.characters) throw new Error("AI返回格式异常，请重试");
+      setGeneratedScript(data);
+      // Init character assets
+      const init: Record<string, CharacterAsset> = {};
+      (data.characters || []).forEach((c: any) => {
+        init[c.name] = { prompt: "", consistencyKey: "", imageUrl: "", isGeneratingPrompt: false, isGeneratingImage: false, imageError: "" };
+      });
+      setCharacterAssets(init);
+    } catch (e: any) {
+      setScriptError(e.message);
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  }
+
+  // Step 2: Generate storyboard panels
+  async function generateStoryboard() {
+    if (!generatedScript) return;
+    setIsGeneratingStoryboard(true);
+    try {
+      const res = await fetch("/api/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "manga_storyboard", script: generatedScript, style: mangaStyle.label }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const raw = data.panels || [];
+      setStoryboardPanels(raw.map((p: any, i: number): StoryboardPanel => ({
+        id: `panel-${Date.now()}-${i}`,
+        index: p.index ?? i + 1,
+        title: p.title ?? `分镜 ${i + 1}`,
+        sceneDescription: p.sceneDescription ?? "",
+        location: p.location ?? "",
+        camera: p.camera ?? "",
+        duration: p.duration ?? 5,
+        transition: p.transition ?? "渐入",
+        dialog: p.dialog ?? "",
+        mood: p.mood ?? "",
+        characterPrompt: "",
+        scenePrompt: "",
+        panelImagePrompt: "",
+        videoPrompt: "",
+        panelImageUrl: "",
+        videoUrl: "",
+        imageStatus: "idle",
+        videoStatus: "idle",
+        videoProgress: 0,
+        taskId: "",
+        errorMsg: "",
+      })));
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setIsGeneratingStoryboard(false);
+    }
+  }
+
+  function updatePanel(id: string, changes: Partial<StoryboardPanel>) {
+    setStoryboardPanels(prev => prev.map(p => p.id === id ? { ...p, ...changes } : p));
+  }
+
+  // Step 3a: Generate character image prompt
+  async function generateCharacterPrompt(charName: string) {
+    const char = generatedScript?.characters.find(c => c.name === charName);
+    if (!char) return;
+    setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingPrompt: true } }));
+    try {
+      const res = await fetch("/api/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: `${char.name}（${char.role}）：${char.appearance}`, mode: "manga_character_prompt", style: mangaStyle.label }),
+      });
+      const data = await res.json();
+      setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], prompt: data.imagePrompt || "", consistencyKey: data.consistencyKey || "", isGeneratingPrompt: false } }));
+    } catch {
+      setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingPrompt: false } }));
+    }
+  }
+
+  // Step 3b: Generate character illustration
+  async function generateCharacterImage(charName: string) {
+    const asset = characterAssets[charName];
+    if (!asset?.prompt) return;
+    setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingImage: true, imageError: "" } }));
+    try {
+      const res = await fetch("/api/manga-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: asset.prompt }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        // API 返回了错误，显示给用户
+        setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingImage: false, imageError: data.error } }));
+        return;
       }
-    } catch (e) { console.error(e); } finally { setIsExpandingPlot(false); }
+      if (!data.imageUrl) {
+        setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingImage: false, imageError: "未返回图片，请检查 API Key 配置" } }));
+        return;
+      }
+      setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], imageUrl: data.imageUrl, isGeneratingImage: false, imageError: "" } }));
+    } catch (e: any) {
+      setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingImage: false, imageError: e.message || "网络请求失败，请重试" } }));
+    }
   }
 
-  // 手动添加一个空分镜
-  function addManualScene() {
-    setMangaScenes(prev => [...prev, {
-      id: `scene-${Date.now()}`,
-      prompt: "",
-      status: "idle",
-      progress: 0,
-      videoUrl: "",
-      errorMsg: "",
-      taskId: "",
-    }]);
+  // Step 3c: Generate image + video prompts for a panel
+  async function generatePanelPrompts(panelId: string): Promise<void> {
+    const panel = storyboardPanels.find(p => p.id === panelId);
+    if (!panel) return;
+
+    // ★ 修复：收集所有角色特征词，而不只取 characters[0]
+    const allCharDesc = (generatedScript?.characters ?? [])
+      .map(c => {
+        const asset = characterAssets[c.name];
+        // consistencyKey 是 AI 提炼的最简特征，如 "short black hair girl, red dress"
+        return asset?.consistencyKey || asset?.prompt || c.appearance || "";
+      })
+      .filter(Boolean)
+      .join("; ");
+
+    // 主角描述单独传给 character 字段（DeepSeek 重点参考）
+    const mainCharDesc = (() => {
+      const c = generatedScript?.characters[0];
+      if (!c) return "";
+      const asset = characterAssets[c.name];
+      return asset?.prompt || c.appearance || "";
+    })();
+
+    try {
+      const res = await fetch("/api/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "manga_panel_prompts",
+          panels: `Panel ${panel.index}: ${panel.title}\nScene: ${panel.sceneDescription}\nLocation: ${panel.location}\nCamera: ${panel.camera}\nMood: ${panel.mood}\nDialog: ${panel.dialog}`,
+          character: mainCharDesc,
+          style: mangaStyle.label,
+        }),
+      });
+      const data = await res.json();
+
+      // ★ 关键：把角色特征词硬编码到 videoPrompt 最前面
+      // Vidu 每格都读到相同的角色描述，外貌漂移大幅降低
+      const charAnchor = allCharDesc ? `保持角色外貌一致：${allCharDesc}，` : "";
+      const rawVideoPrompt = data.videoPrompt || `${panel.sceneDescription}，${mangaStyle.desc}`;
+
+      updatePanel(panelId, {
+        characterPrompt:  data.characterPrompt  || "",
+        scenePrompt:      data.scenePrompt      || "",
+        panelImagePrompt: data.panelImagePrompt || `${panel.sceneDescription}, ${mangaStyle.desc}`,
+        videoPrompt:      charAnchor + rawVideoPrompt,  // ★ 加角色锚点前缀
+      });
+    } catch {
+      // fallback 时也加上角色描述词
+      const charAnchor = allCharDesc ? `保持角色外貌一致：${allCharDesc}，` : "";
+      updatePanel(panelId, {
+        videoPrompt: charAnchor + `${panel.sceneDescription}，${mangaStyle.desc}，${panel.camera}`,
+      });
+    }
   }
 
-  // 删除分镜
-  function removeScene(id: string) {
-    setMangaScenes(prev => prev.filter(s => s.id !== id));
+  // Step 3d: Generate storyboard illustration for a single panel
+  async function generatePanelImage(panelId: string) {
+    const panel = storyboardPanels.find(p => p.id === panelId);
+    if (!panel) return;
+    if (!panel.panelImagePrompt) {
+      await generatePanelPrompts(panelId);
+    }
+    const updated = storyboardPanels.find(p => p.id === panelId);
+    const imgPrompt = updated?.panelImagePrompt || `${panel.sceneDescription}, ${mangaStyle.desc}`;
+
+    // ★ 修复：收集所有角色描述（已在此处正确实现，保持不变）
+    const charTextPrompts: string[] = [];
+    if (generatedScript?.characters) {
+      generatedScript.characters.forEach(c => {
+        const asset = characterAssets[c.name];
+        const desc = asset?.prompt || c.appearance;
+        if (desc) charTextPrompts.push(desc);
+      });
+    }
+
+    updatePanel(panelId, { imageStatus: "generating" });
+    try {
+      const res = await fetch("/api/manga-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: imgPrompt,
+          size: "1024x1792",  // ★ 竖版 9:16，更适合漫剧分镜
+          character_prompts: charTextPrompts.length > 0 ? charTextPrompts : undefined,
+        }),
+      });
+      const data = await res.json();
+      updatePanel(panelId, { panelImageUrl: data.imageUrl || "", imageStatus: data.imageUrl ? "done" : "error" });
+    } catch {
+      updatePanel(panelId, { imageStatus: "error" });
+    }
   }
 
-  // 更新单条分镜 prompt
-  function updateScenePrompt(id: string, val: string) {
-    setMangaScenes(prev => prev.map(s => s.id === id ? { ...s, prompt: val } : s));
+  // Step 3 batch: Generate all panel images sequentially
+  async function generateAllImages() {
+    setIsGeneratingAllImages(true);
+    for (const panel of storyboardPanels) {
+      if (panel.imageStatus !== "done") {
+        await generatePanelImage(panel.id);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+    setIsGeneratingAllImages(false);
   }
 
-  // 轮询单个漫剧分镜任务
-  async function pollMangaScene(sceneId: string, taskId: string) {
+  // Step 4: Generate video for a single panel
+  async function generatePanelVideo(panelId: string) {
+    const panel = storyboardPanels.find(p => p.id === panelId);
+    if (!panel) return;
+
+    // 先确保 videoPrompt 已生成（含角色锚点）
+    if (!panel.videoPrompt) {
+      await generatePanelPrompts(panelId);
+    }
+    const freshPanel = storyboardPanels.find(p => p.id === panelId) || panel;
+
+    // ★ 修复1：确保 videoPrompt 含角色描述词（双重保底）
+    const allCharDesc = (generatedScript?.characters ?? [])
+      .map(c => {
+        const asset = characterAssets[c.name];
+        return asset?.consistencyKey || c.appearance || "";
+      })
+      .filter(Boolean)
+      .join("; ");
+
+    const charAnchor = allCharDesc ? `保持角色外貌一致：${allCharDesc}，` : "";
+    const finalVideoPrompt = freshPanel.videoPrompt?.startsWith("保持角色外貌一致")
+      ? freshPanel.videoPrompt   // 已含锚点，不重复
+      : charAnchor + (freshPanel.videoPrompt || `${freshPanel.sceneDescription}，${mangaStyle.desc}，${freshPanel.camera}`);
+
+    updatePanel(panelId, { videoStatus: "creating", errorMsg: "" });
+
+    try {
+      // ★ 修复2：把图片 URL 转为 base64 再传给 Vidu
+      //   原代码直接传 http URL，Vidu img2video 只认 base64，导致角色图实际没传进去
+      let frameBase64: string | null = null;
+
+      // 优先找角色立绘（跳过 SVG 占位符）
+      for (const c of generatedScript?.characters ?? []) {
+        const url = characterAssets[c.name]?.imageUrl;
+        if (url && !url.startsWith("data:image/svg")) {
+          frameBase64 = await urlToBase64(url);  // ★ URL → base64
+          if (frameBase64) break;
+        }
+      }
+
+      // 没有角色图时用分镜图
+      if (!frameBase64) {
+        const panelImgUrl = freshPanel.panelImageUrl;
+        if (panelImgUrl && !panelImgUrl.startsWith("data:image/svg")) {
+          frameBase64 = await urlToBase64(panelImgUrl);
+        }
+      }
+
+      const hasImage = !!frameBase64;
+      const body: any = {
+        prompt: finalVideoPrompt,
+        aspect_ratio: "9:16",
+        duration: Math.min(Math.max(freshPanel.duration || 5, 3), 8),
+        resolution: "720p",
+        t: hasImage ? 2 : 1,
+      };
+      if (hasImage) body.first_frame = frameBase64;  // ★ 传 base64
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.error) { updatePanel(panelId, { videoStatus: "failed", errorMsg: data.error }); return; }
+      updatePanel(panelId, { videoStatus: "queueing", taskId: data.task_id });
+      await pollMangaPanelVideo(panelId, data.task_id);
+    } catch (err: any) {
+      updatePanel(panelId, { videoStatus: "failed", errorMsg: err.message });
+    }
+  }
+
+  async function pollMangaPanelVideo(panelId: string, taskId: string) {
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 5000));
       try {
-        const res = await fetch(`/api/task/${taskId}`);
+        const res  = await fetch(`/api/task/${taskId}`);
         const data = await res.json();
-        setMangaScenes(prev => prev.map(s => {
-          if (s.id !== sceneId) return s;
-          if (data.state === "success") {
-            const url = data.creations?.[0]?.url || "";
-            return { ...s, status: "success", videoUrl: url, progress: 100 };
-          }
-          if (data.state === "failed") return { ...s, status: "failed", errorMsg: "生成失败" };
-          if (data.state === "processing") return { ...s, status: "processing", progress: Math.round(data.progress || 0) };
-          if (data.state === "queueing") return { ...s, status: "queueing" };
-          return s;
-        }));
-        const cur = (await (async () => {
-          const r = await fetch(`/api/task/${taskId}`);
-          return r.json();
-        })());
-        if (cur.state === "success" || cur.state === "failed") return;
+        if (data.state === "success") {
+          updatePanel(panelId, { videoStatus: "success", videoUrl: data.creations?.[0]?.url || "", videoProgress: 100 });
+          return;
+        }
+        if (data.state === "failed") { updatePanel(panelId, { videoStatus: "failed", errorMsg: "生成失败" }); return; }
+        if (data.state === "processing") updatePanel(panelId, { videoStatus: "processing", videoProgress: Math.round(data.progress || 0) });
+        if (data.state === "queueing")   updatePanel(panelId, { videoStatus: "queueing" });
       } catch {}
     }
-    setMangaScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: "failed", errorMsg: "生成超时" } : s));
+    updatePanel(panelId, { videoStatus: "failed", errorMsg: "生成超时" });
   }
 
-  // 顺序生成所有分镜（串行，防止并发太多）
-  async function generateAllScenes() {
-    const char = characters.find(c => c.id === selectedCharId);
+  // Delete a storyboard panel
+  function deletePanel(id: string) {
+    setStoryboardPanels(prev => prev.filter(p => p.id !== id));
+  }
+
+  // Upload a local image as character portrait
+  function handleCharImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingCharName) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setCharacterAssets(prev => ({
+        ...prev,
+        [uploadingCharName]: { ...prev[uploadingCharName], imageUrl: dataUrl },
+      }));
+    };
+    reader.readAsDataURL(file);
+    // reset input so same file can be re-selected
+    e.target.value = "";
+    setUploadingCharName(null);
+  }
+
+  // Step 4 batch: Generate all panel videos sequentially
+  async function generateAllVideos() {
     setMangaGenerating(true);
-
-    for (const scene of mangaScenes) {
-      if (!scene.prompt.trim()) continue;
-      // 标记为创建中
-      setMangaScenes(prev => prev.map(s => s.id === scene.id ? { ...s, status: "creating", errorMsg: "" } : s));
-      try {
-        const body: any = {
-          prompt: scene.prompt,
-          aspect_ratio: "9:16",   // 漫剧默认竖屏
-          duration: 5,
-          resolution: "720p",
-          t: char ? 2 : 1,         // 有角色图用 img2video，没有用 text2video
-        };
-        if (char) body.first_frame = char.imageBase64;
-
-        const res = await fetch("/api/generate", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (data.error) {
-          setMangaScenes(prev => prev.map(s => s.id === scene.id ? { ...s, status: "failed", errorMsg: data.error } : s));
-          continue;
-        }
-        setMangaScenes(prev => prev.map(s => s.id === scene.id ? { ...s, status: "queueing", taskId: data.task_id } : s));
-        await pollMangaScene(scene.id, data.task_id);
-      } catch (err: any) {
-        setMangaScenes(prev => prev.map(s => s.id === scene.id ? { ...s, status: "failed", errorMsg: err.message } : s));
+    for (const panel of storyboardPanels) {
+      if (panel.videoStatus !== "success") {
+        await generatePanelVideo(panel.id);
       }
     }
     setMangaGenerating(false);
-  }
-
-  // 重新生成单个分镜
-  async function retryScene(sceneId: string) {
-    const scene = mangaScenes.find(s => s.id === sceneId);
-    if (!scene || !scene.prompt.trim()) return;
-    const char = characters.find(c => c.id === selectedCharId);
-    setMangaScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: "creating", errorMsg: "", videoUrl: "" } : s));
-    try {
-      const body: any = {
-        prompt: scene.prompt, aspect_ratio: "9:16", duration: 5, resolution: "720p",
-        t: char ? 2 : 1,
-      };
-      if (char) body.first_frame = char.imageBase64;
-      const res = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json();
-      if (data.error) { setMangaScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: "failed", errorMsg: data.error } : s)); return; }
-      setMangaScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: "queueing", taskId: data.task_id } : s));
-      await pollMangaScene(sceneId, data.task_id);
-    } catch (err: any) {
-      setMangaScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: "failed", errorMsg: err.message } : s));
-    }
-  }
-
-  // ── 角色库管理 ──
-  async function handleCharImage(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; if (!file) return;
-    const base64 = await toBase64(file);
-    setNewCharBase64(base64);
-    setNewCharPreview(URL.createObjectURL(file));
-  }
-
-  function saveNewChar() {
-    if (!newCharName.trim() || !newCharBase64) return;
-    const card: CharacterCard = {
-      id: `char-${Date.now()}`,
-      name: newCharName.trim(),
-      imageBase64: newCharBase64,
-      styleDesc: newCharStyle.trim() || `${newCharName}，保持角色外貌一致`,
-    };
-    saveCharacters([...characters, card]);
-    setShowAddChar(false);
-    setNewCharName(""); setNewCharStyle(""); setNewCharPreview(""); setNewCharBase64("");
-    setSelectedCharId(card.id);
-  }
-
-  function deleteChar(id: string) {
-    saveCharacters(characters.filter(c => c.id !== id));
-    if (selectedCharId === id) setSelectedCharId(null);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render helpers
   // ─────────────────────────────────────────────────────────────────────────
 
-  function sceneStatusColor(s: TaskStatus) {
-    if (s === "success") return "#4ade80";
-    if (s === "failed") return "#f87171";
-    if (s === "idle") return "rgba(255,255,255,0.2)";
-    return "#c084fc";
-  }
-
-  function sceneStatusLabel(scene: MangaScene) {
-    if (scene.status === "idle") return "待生成";
-    if (scene.status === "creating") return "创建中…";
-    if (scene.status === "queueing") return "排队中…";
-    if (scene.status === "processing") return `生成中 ${scene.progress}%`;
-    if (scene.status === "success") return "完成";
-    if (scene.status === "failed") return scene.errorMsg || "失败";
+  function panelVideoLabel(p: StoryboardPanel) {
+    if (p.videoStatus === "idle")       return "待生成";
+    if (p.videoStatus === "creating")   return "创建中…";
+    if (p.videoStatus === "queueing")   return "排队中…";
+    if (p.videoStatus === "processing") return `生成中 ${p.videoProgress}%`;
+    if (p.videoStatus === "success")    return "完成 ✓";
+    if (p.videoStatus === "failed")     return p.errorMsg || "失败";
     return "";
   }
 
-  const NAV_ITEMS = [{ id: "history", icon: "⏱", label: "历史记录" }];
+  function videoStatusColor(s: TaskStatus) {
+    if (s === "success") return "#4ade80";
+    if (s === "failed")  return "#f87171";
+    if (s === "idle")    return "rgba(255,255,255,0.2)";
+    return "#c084fc";
+  }
+
+  const doneCount    = storyboardPanels.filter(p => p.videoStatus === "success").length;
+  const runningCount = storyboardPanels.filter(p => ["creating","queueing","processing"].includes(p.videoStatus)).length;
+  const failCount    = storyboardPanels.filter(p => p.videoStatus === "failed").length;
+  const imgDoneCount = storyboardPanels.filter(p => p.imageStatus === "done").length;
+
+  const MANGA_STEPS = [
+    { n: 1, label: "剧本生成", icon: "✍" },
+    { n: 2, label: "智能分镜", icon: "🎞" },
+    { n: 3, label: "角色画风", icon: "🎨" },
+    { n: 4, label: "一键成片", icon: "▶" },
+  ];
 
   // ─────────────────────────────────────────────────────────────────────────
   // JSX
@@ -439,7 +684,6 @@ export default function Home() {
 
       {/* ── SIDEBAR ── */}
       <div style={{ width: modeBarOpen ? 220 : 56, borderRight: "1px solid rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", flexShrink: 0, transition: "width 0.25s", overflow: "hidden", background: "#0f0f18" }}>
-
         {/* Logo */}
         <div style={{ height: 60, display: "flex", alignItems: "center", padding: "0 12px", gap: 10, borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
           <div style={{ width: 32, height: 32, borderRadius: 9, background: "linear-gradient(135deg,#6c5ce7,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>▶</div>
@@ -455,35 +699,26 @@ export default function Home() {
           )}
         </button>
 
-        {/* ── 漫剧创作入口（置顶） ── */}
+        {/* 漫剧创作入口 */}
         <div style={{ padding: "8px 8px 4px" }}>
-          <button
-            onClick={() => { setIsMangaMode(true); setMangaStep(1); setActiveNav("manga"); }}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: "none", marginBottom: 4, cursor: "pointer", transition: "all 0.15s",
-              background: isMangaMode ? "rgba(250,197,117,0.18)" : "rgba(250,197,117,0.07)",
-              color: isMangaMode ? "#fac775" : "rgba(250,197,117,0.6)",
-            }}
-          >
+          <button onClick={() => { setIsMangaMode(true); setActiveNav("manga"); }}
+            style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: "none", marginBottom: 4, cursor: "pointer", transition: "all 0.15s", background: isMangaMode ? "rgba(250,197,117,0.18)" : "rgba(250,197,117,0.07)", color: isMangaMode ? "#fac775" : "rgba(250,197,117,0.6)" }}>
             <span style={{ width: 20, textAlign: "center", fontSize: 15, flexShrink: 0 }}>🎬</span>
             {modeBarOpen && (
               <div style={{ flex: 1, textAlign: "left" }}>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>漫剧创作</div>
-                <div style={{ fontSize: 11, color: "rgba(250,197,117,0.5)", marginTop: 2 }}>AI一键生成漫剧</div>
+                <div style={{ fontSize: 11, color: "rgba(250,197,117,0.5)", marginTop: 2 }}>AI全流程导演</div>
               </div>
             )}
           </button>
-
           {modeBarOpen && <div style={{ height: 1, background: "rgba(255,255,255,0.05)", margin: "4px 4px 8px" }} />}
         </div>
 
         {/* 普通模式列表 */}
         <div style={{ padding: "0 8px", flex: 1, overflowY: "auto" }}>
           {MODES.map((m) => (
-            <button key={m.value}
-              onClick={() => { setFrameMode(m.value); setActiveNav("generate"); setIsMangaMode(false); }}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: "none", marginBottom: 4, cursor: "pointer", transition: "all 0.15s", background: !isMangaMode && frameMode === m.value ? "rgba(168,85,247,0.14)" : "transparent", color: !isMangaMode && frameMode === m.value ? "#c084fc" : "rgba(255,255,255,0.55)" }}
-            >
+            <button key={m.value} onClick={() => { setFrameMode(m.value); setActiveNav("generate"); setIsMangaMode(false); }}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: "none", marginBottom: 4, cursor: "pointer", transition: "all 0.15s", background: !isMangaMode && frameMode === m.value ? "rgba(168,85,247,0.14)" : "transparent", color: !isMangaMode && frameMode === m.value ? "#c084fc" : "rgba(255,255,255,0.55)" }}>
               <span style={{ width: 20, textAlign: "center", fontSize: 15, flexShrink: 0 }}>{m.icon}</span>
               {modeBarOpen && (
                 <div style={{ flex: 1, textAlign: "left" }}>
@@ -497,267 +732,495 @@ export default function Home() {
 
         {/* 历史记录 */}
         <div style={{ marginTop: "auto", padding: 8, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-          {NAV_ITEMS.map((n) => (
-            <button key={n.id} onClick={() => { setActiveNav(n.id); setIsMangaMode(false); }}
-              style={{ width: "100%", height: 40, borderRadius: 10, border: "none", marginBottom: 4, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, padding: "0 12px", background: activeNav === n.id ? "rgba(168,85,247,0.15)" : "transparent", color: activeNav === n.id ? "#c084fc" : "rgba(255,255,255,0.35)" }}>
-              <span>{n.icon}</span>
-              {modeBarOpen && <span style={{ fontSize: 13 }}>{n.label}</span>}
-            </button>
-          ))}
+          <button onClick={() => { setActiveNav("history"); setIsMangaMode(false); }}
+            style={{ width: "100%", height: 40, borderRadius: 10, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, padding: "0 12px", background: activeNav === "history" ? "rgba(168,85,247,0.15)" : "transparent", color: activeNav === "history" ? "#c084fc" : "rgba(255,255,255,0.35)" }}>
+            <span>⏱</span>
+            {modeBarOpen && <span style={{ fontSize: 13 }}>历史记录</span>}
+          </button>
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          漫剧模式主界面
-      ═══════════════════════════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════════════════════════════
+          漫剧创作 — 4步全流程
+      ═══════════════════════════════════════════════════════════════ */}
       {isMangaMode ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
-          {/* 顶部标题栏 + 步骤指示器 */}
-          <div style={{ padding: "0 24px", height: 60, borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", gap: 16, flexShrink: 0, background: "#0f0f18" }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: "#fac775" }}>🎬 漫剧创作</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 16 }}>
-              {[{ n: 1, label: "剧情" }, { n: 2, label: "角色" }, { n: 3, label: "分镜" }].map(({ n, label }) => (
-                <div key={n} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {n > 1 && <div style={{ width: 24, height: 1, background: mangaStep >= n ? "rgba(250,197,117,0.5)" : "rgba(255,255,255,0.1)" }} />}
-                  <button onClick={() => setMangaStep(n)}
-                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 500,
-                      background: mangaStep === n ? "rgba(250,197,117,0.18)" : "transparent",
-                      color: mangaStep >= n ? "#fac775" : "rgba(255,255,255,0.25)" }}>
-                    <span style={{ width: 18, height: 18, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, background: mangaStep >= n ? "#fac775" : "rgba(255,255,255,0.1)", color: mangaStep >= n ? "#0c0c14" : "rgba(255,255,255,0.3)" }}>{n}</span>
-                    {label}
-                  </button>
-                </div>
-              ))}
+          {/* ── 顶部步骤导航 ── */}
+          <div style={{ height: 60, borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", padding: "0 24px", gap: 0, flexShrink: 0, background: "#0f0f18" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#fac775", marginRight: 24, flexShrink: 0 }}>🎬 漫剧创作</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 0, flex: 1 }}>
+              {MANGA_STEPS.map(({ n, label, icon }, idx) => {
+                const done   = mangaStep > n;
+                const active = mangaStep === n;
+                const locked = mangaStep < n && (n === 2 ? !generatedScript : n === 3 ? storyboardPanels.length === 0 : n === 4 ? storyboardPanels.length === 0 : false);
+                return (
+                  <div key={n} style={{ display: "flex", alignItems: "center", gap: 0 }}>
+                    {idx > 0 && <div style={{ width: 32, height: 1, background: done ? "rgba(250,197,117,0.5)" : "rgba(255,255,255,0.08)", margin: "0 4px" }} />}
+                    <button onClick={() => !locked && setMangaStep(n)} disabled={locked}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 20, border: active ? "1px solid rgba(250,197,117,0.4)" : "1px solid transparent", cursor: locked ? "not-allowed" : "pointer", background: active ? "rgba(250,197,117,0.12)" : done ? "rgba(250,197,117,0.06)" : "transparent", color: active ? "#fac775" : done ? "rgba(250,197,117,0.7)" : locked ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.35)", fontSize: 12, fontWeight: active ? 600 : 400, transition: "all 0.15s" }}>
+                      <span style={{ width: 18, height: 18, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: done ? 10 : 10, background: active ? "#fac775" : done ? "rgba(250,197,117,0.4)" : "rgba(255,255,255,0.07)", color: active ? "#0c0c14" : done ? "#fac775" : "inherit" }}>
+                        {done ? "✓" : icon}
+                      </span>
+                      {label}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Style + Genre quick display */}
+            <div style={{ display: "flex", gap: 6, flexShrink: 0, marginLeft: 16 }}>
+              <span style={{ padding: "3px 9px", borderRadius: 20, background: "rgba(168,85,247,0.12)", border: "1px solid rgba(168,85,247,0.2)", color: "#c084fc", fontSize: 11 }}>{mangaStyle.label}</span>
+              <span style={{ padding: "3px 9px", borderRadius: 20, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.35)", fontSize: 11 }}>{mangaGenre}</span>
             </div>
           </div>
 
-          {/* 步骤内容 */}
-          <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          {/* ── 步骤内容 ── */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
 
-            {/* ── Step 1: 剧情输入 ── */}
+            {/* ════════════════════════════════════
+                STEP 1 — 剧本生成
+            ════════════════════════════════════ */}
             {mangaStep === 1 && (
-              <div style={{ maxWidth: 640, margin: "0 auto" }}>
-                <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 600 }}>第一步：输入剧情</h2>
-                <p style={{ margin: "0 0 20px", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>用一句话描述这集漫剧的剧情，AI 会自动拆分为多个分镜</p>
+              <div style={{ maxWidth: 720, margin: "0 auto" }}>
+                <div style={{ marginBottom: 28 }}>
+                  <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700 }}>第一步：剧本生成</h2>
+                  <p style={{ margin: 0, fontSize: 13, color: "rgba(255,255,255,0.35)" }}>输入一句剧情创意，自动扩写为完整剧本，包含人物关系、场景划分和情感弧线</p>
+                </div>
 
-                {/* 风格选择 */}
-                <div style={{ marginBottom: 20 }}>
-                  <p style={PL}>选择漫剧风格</p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {MANGA_STYLES.map(s => (
-                      <button key={s.label} onClick={() => setMangaStyle(s)}
-                        style={{ padding: "6px 14px", borderRadius: 20, border: `1px solid ${mangaStyle.label === s.label ? "rgba(250,197,117,0.6)" : "rgba(255,255,255,0.08)"}`, background: mangaStyle.label === s.label ? "rgba(250,197,117,0.12)" : "rgba(255,255,255,0.02)", color: mangaStyle.label === s.label ? "#fac775" : "rgba(255,255,255,0.45)", fontSize: 12, cursor: "pointer" }}>
-                        {s.label}
-                      </button>
-                    ))}
+                {/* 类型 + 画风 */}
+                <div style={{ display: "flex", gap: 20, marginBottom: 20 }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={PL}>漫剧类型</p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {MANGA_GENRES.map(g => (
+                        <button key={g} onClick={() => setMangaGenre(g)}
+                          style={{ padding: "5px 12px", borderRadius: 20, border: `1px solid ${mangaGenre === g ? "rgba(168,85,247,0.6)" : "rgba(255,255,255,0.08)"}`, background: mangaGenre === g ? "rgba(168,85,247,0.12)" : "rgba(255,255,255,0.02)", color: mangaGenre === g ? "#c084fc" : "rgba(255,255,255,0.45)", fontSize: 12, cursor: "pointer" }}>{g}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={PL}>画风风格</p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {MANGA_STYLES.map(s => (
+                        <button key={s.label} onClick={() => setMangaStyle(s)}
+                          style={{ padding: "5px 12px", borderRadius: 20, border: `1px solid ${mangaStyle.label === s.label ? "rgba(250,197,117,0.6)" : "rgba(255,255,255,0.08)"}`, background: mangaStyle.label === s.label ? "rgba(250,197,117,0.1)" : "rgba(255,255,255,0.02)", color: mangaStyle.label === s.label ? "#fac775" : "rgba(255,255,255,0.45)", fontSize: 12, cursor: "pointer" }}>{s.label}</button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {/* 剧情模板 */}
+                {/* 模板 */}
                 <div style={{ marginBottom: 12 }}>
-                  <p style={PL}>快速模板（点击填入）</p>
+                  <p style={PL}>快速剧情模板</p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {MANGA_PLOT_TEMPLATES.map(t => (
-                      <button key={t.label} onClick={() => setMangaPlot(t.plot)}
-                        style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.45)", fontSize: 11, cursor: "pointer" }}>
-                        {t.label}
-                      </button>
+                      <button key={t.label} onClick={() => setMangaPlotInput(t.plot)}
+                        style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.5)", fontSize: 11, cursor: "pointer" }}>{t.label}</button>
                     ))}
                   </div>
                 </div>
 
-                {/* 剧情输入框 */}
-                <textarea
-                  value={mangaPlot}
-                  onChange={e => setMangaPlot(e.target.value)}
-                  placeholder="例如：霸道总裁在咖啡厅与平凡女主偶然相遇，眼神交汇，心动一刻…"
-                  style={{ width: "100%", height: 100, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 9, padding: "10px 12px", color: "#e2e0f0", fontSize: 13, lineHeight: 1.6, resize: "none", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }}
-                />
+                {/* 输入框 */}
+                <textarea value={mangaPlotInput} onChange={e => setMangaPlotInput(e.target.value)}
+                  placeholder={"用一句话描述漫剧的核心剧情…\n例如：霸道总裁在咖啡厅与平凡女主偶然相遇，眼神交汇，心动一刻"}
+                  style={{ width: "100%", height: 110, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px", color: "#e2e0f0", fontSize: 13, lineHeight: 1.7, resize: "none", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} />
 
-                <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-                  <button onClick={expandMangaPlot} disabled={!mangaPlot.trim() || isExpandingPlot}
-                    style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: mangaPlot.trim() ? "linear-gradient(135deg,#EF9F27,#fac775)" : "rgba(250,197,117,0.1)", color: mangaPlot.trim() ? "#0c0c14" : "rgba(255,255,255,0.2)", fontSize: 14, fontWeight: 600, cursor: mangaPlot.trim() ? "pointer" : "not-allowed" }}>
-                    {isExpandingPlot ? "AI 拆分分镜中…" : "✦ AI 自动拆分分镜"}
-                  </button>
-                  <button onClick={() => setMangaStep(2)} style={{ padding: "12px 20px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 13, cursor: "pointer" }}>
-                    跳过 →
-                  </button>
-                </div>
-              </div>
-            )}
+                <button onClick={generateScript} disabled={!mangaPlotInput.trim() || isGeneratingScript}
+                  style={{ width: "100%", marginTop: 12, padding: "13px 0", borderRadius: 10, border: "none", background: mangaPlotInput.trim() && !isGeneratingScript ? "linear-gradient(135deg,#EF9F27,#fac775)" : "rgba(250,197,117,0.1)", color: mangaPlotInput.trim() && !isGeneratingScript ? "#0c0c14" : "rgba(255,255,255,0.2)", fontSize: 14, fontWeight: 700, cursor: mangaPlotInput.trim() && !isGeneratingScript ? "pointer" : "not-allowed", letterSpacing: "0.3px" }}>
+                  {isGeneratingScript ? "✦ AI 正在生成剧本…" : "✦ 一键生成剧本"}
+                </button>
 
-            {/* ── Step 2: 角色库 ── */}
-            {mangaStep === 2 && (
-              <div style={{ maxWidth: 640, margin: "0 auto" }}>
-                <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 600 }}>第二步：选择角色</h2>
-                <p style={{ margin: "0 0 20px", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>上传主角参考图，生成视频时自动带入保持角色一致（可跳过）</p>
+                {scriptError && <p style={{ marginTop: 8, color: "#f87171", fontSize: 12 }}>⚠ {scriptError}</p>}
 
-                {/* 已有角色卡 */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10, marginBottom: 16 }}>
-                  {/* 不使用角色 */}
-                  <button onClick={() => setSelectedCharId(null)}
-                    style={{ height: 130, borderRadius: 10, border: `1px solid ${selectedCharId === null ? "rgba(250,197,117,0.6)" : "rgba(255,255,255,0.08)"}`, background: selectedCharId === null ? "rgba(250,197,117,0.08)" : "rgba(255,255,255,0.02)", color: selectedCharId === null ? "#fac775" : "rgba(255,255,255,0.3)", fontSize: 12, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                    <span style={{ fontSize: 24, opacity: 0.5 }}>◎</span>
-                    <span>纯文字生成</span>
-                  </button>
-
-                  {characters.map(char => (
-                    <div key={char.id} style={{ position: "relative" }}>
-                      <button onClick={() => setSelectedCharId(char.id)}
-                        style={{ width: "100%", height: 130, borderRadius: 10, border: `1px solid ${selectedCharId === char.id ? "rgba(250,197,117,0.7)" : "rgba(255,255,255,0.08)"}`, overflow: "hidden", cursor: "pointer", padding: 0, background: "transparent", display: "block" }}>
-                        <img src={char.imageBase64} alt={char.name} style={{ width: "100%", height: 90, objectFit: "cover", display: "block" }} />
-                        <div style={{ padding: "6px 8px", fontSize: 12, color: selectedCharId === char.id ? "#fac775" : "rgba(255,255,255,0.6)", textAlign: "center", background: "rgba(0,0,0,0.4)" }}>{char.name}</div>
-                      </button>
-                      <button onClick={() => deleteChar(char.id)}
-                        style={{ position: "absolute", top: 4, right: 4, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.7)", color: "#f87171", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>×</button>
-                    </div>
-                  ))}
-
-                  {/* 添加新角色 */}
-                  <button onClick={() => setShowAddChar(true)}
-                    style={{ height: 130, borderRadius: 10, border: "1px dashed rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.02)", color: "rgba(255,255,255,0.25)", fontSize: 12, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                    <span style={{ fontSize: 24, opacity: 0.4 }}>⊕</span>
-                    <span>添加角色</span>
-                  </button>
-                </div>
-
-                {/* 添加角色表单 */}
-                {showAddChar && (
-                  <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                    <p style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 500 }}>新建角色卡</p>
-                    <div style={{ display: "flex", gap: 12 }}>
-                      {/* 图片上传 */}
-                      <div onClick={() => charImageRef.current?.click()}
-                        style={{ width: 80, height: 80, borderRadius: 9, border: "1px dashed rgba(255,255,255,0.15)", cursor: "pointer", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {newCharPreview ? <img src={newCharPreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 22, opacity: 0.3 }}>⊕</span>}
+                {/* ── 剧本预览 ── */}
+                {generatedScript && (
+                  <div style={{ marginTop: 24, borderRadius: 14, border: "1px solid rgba(250,197,117,0.2)", background: "rgba(250,197,117,0.04)", overflow: "hidden" }}>
+                    {/* 标题行 */}
+                    <div style={{ padding: "14px 18px", borderBottom: "1px solid rgba(250,197,117,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: "#fac775" }}>《{generatedScript.title}》</span>
+                        <span style={{ marginLeft: 10, fontSize: 12, color: "rgba(250,197,117,0.5)", background: "rgba(250,197,117,0.1)", padding: "2px 8px", borderRadius: 20 }}>{generatedScript.genre}</span>
                       </div>
-                      <input ref={charImageRef} type="file" accept="image/*" onChange={handleCharImage} style={{ display: "none" }} />
-                      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-                        <input value={newCharName} onChange={e => setNewCharName(e.target.value)} placeholder="角色名（如：林小晴）"
-                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 7, padding: "7px 10px", color: "#e2e0f0", fontSize: 12, outline: "none" }} />
-                        <input value={newCharStyle} onChange={e => setNewCharStyle(e.target.value)} placeholder="外貌描述（如：黑色长发，白色校服）"
-                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 7, padding: "7px 10px", color: "#e2e0f0", fontSize: 12, outline: "none" }} />
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      <button onClick={saveNewChar} disabled={!newCharName.trim() || !newCharBase64}
-                        style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: newCharName.trim() && newCharBase64 ? "linear-gradient(135deg,#EF9F27,#fac775)" : "rgba(255,255,255,0.05)", color: newCharName.trim() && newCharBase64 ? "#0c0c14" : "rgba(255,255,255,0.2)", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>
-                        保存角色
+                      <button onClick={() => setMangaStep(2)}
+                        style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#EF9F27,#fac775)", color: "#0c0c14", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                        下一步：智能分镜 →
                       </button>
-                      <button onClick={() => setShowAddChar(false)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "rgba(255,255,255,0.3)", fontSize: 13, cursor: "pointer" }}>取消</button>
+                    </div>
+
+                    <div style={{ padding: "14px 18px" }}>
+                      {/* 梗概 */}
+                      <p style={{ margin: "0 0 14px", fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.7 }}>{generatedScript.synopsis}</p>
+
+                      {/* 角色 */}
+                      <p style={PL}>主要角色</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                        {generatedScript.characters.map(c => (
+                          <div key={c.name} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "8px 12px", minWidth: 160 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "#e2e0f0" }}>{c.name}</span>
+                              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", padding: "1px 6px", borderRadius: 10 }}>{c.role}</span>
+                            </div>
+                            <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.5 }}>{c.appearance}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 场景列表 */}
+                      <p style={PL}>场景划分（{generatedScript.scenes.length} 幕）</p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {generatedScript.scenes.map(s => (
+                          <div key={s.index} style={{ display: "flex", gap: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                            <span style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(250,197,117,0.15)", color: "#fac775", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{s.index}</span>
+                            <div>
+                              <p style={{ margin: "0 0 3px", fontSize: 12, fontWeight: 600, color: "#e2e0f0" }}>{s.title}</p>
+                              <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.6 }}>{s.content}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
-
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={() => setMangaStep(1)} style={{ padding: "12px 20px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 13, cursor: "pointer" }}>← 上一步</button>
-                  <button onClick={() => {
-                    if (mangaScenes.length === 0) {
-                      // 如果没有分镜，创建3个空的
-                      const char = characters.find(c => c.id === selectedCharId);
-                      const stylePrefix = mangaStyle.desc + "，";
-                      const charPrefix = char ? `${char.styleDesc}，` : "";
-                      setMangaScenes([1, 2, 3].map(i => ({ id: `scene-${Date.now()}-${i}`, prompt: stylePrefix + charPrefix, status: "idle" as TaskStatus, progress: 0, videoUrl: "", errorMsg: "", taskId: "" })));
-                    }
-                    setMangaStep(3);
-                  }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#EF9F27,#fac775)", color: "#0c0c14", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-                    下一步：编辑分镜 →
-                  </button>
-                </div>
               </div>
             )}
 
-            {/* ── Step 3: 分镜板 + 生成 ── */}
-            {mangaStep === 3 && (
-              <div style={{ maxWidth: 900, margin: "0 auto" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+            {/* ════════════════════════════════════
+                STEP 2 — 智能分镜
+            ════════════════════════════════════ */}
+            {mangaStep === 2 && (
+              <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, gap: 16 }}>
                   <div>
-                    <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 600 }}>第三步：分镜板</h2>
-                    <p style={{ margin: 0, fontSize: 13, color: "rgba(255,255,255,0.4)" }}>确认每格分镜描述词，点击「一键生成全集」</p>
+                    <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700 }}>第二步：智能分镜</h2>
+                    <p style={{ margin: 0, fontSize: 13, color: "rgba(255,255,255,0.35)" }}>剧本拆解为逐格分镜脚本，包含场景、镜头、转场、时长和对白</p>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={addManualScene} disabled={mangaGenerating}
-                      style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 12, cursor: "pointer" }}>
-                      + 添加分镜
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button onClick={() => setMangaStep(1)}
+                      style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>← 剧本</button>
+                    <button onClick={generateStoryboard} disabled={isGeneratingStoryboard || !generatedScript}
+                      style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: !isGeneratingStoryboard ? "linear-gradient(135deg,#6c5ce7,#a855f7)" : "rgba(168,85,247,0.1)", color: !isGeneratingStoryboard ? "#fff" : "rgba(255,255,255,0.2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      {isGeneratingStoryboard ? "AI 分镜中…" : storyboardPanels.length > 0 ? "↻ 重新分镜" : "✦ 智能分镜"}
                     </button>
-                    <button onClick={generateAllScenes} disabled={mangaGenerating || mangaScenes.every(s => !s.prompt.trim())}
-                      style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: !mangaGenerating ? "linear-gradient(135deg,#EF9F27,#fac775)" : "rgba(250,197,117,0.1)", color: !mangaGenerating ? "#0c0c14" : "rgba(255,255,255,0.2)", fontSize: 13, fontWeight: 600, cursor: mangaGenerating ? "not-allowed" : "pointer" }}>
-                      {mangaGenerating ? "生成中…" : "▶ 一键生成全集"}
-                    </button>
+                    {storyboardPanels.length > 0 && (
+                      <button onClick={() => setMangaStep(3)}
+                        style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#EF9F27,#fac775)", color: "#0c0c14", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                        角色画风 →
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* 分镜格列表 */}
-                {mangaScenes.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: 60, color: "rgba(255,255,255,0.2)", fontSize: 13 }}>
-                    <p>还没有分镜，点击「← 上一步」输入剧情让 AI 自动生成，</p>
-                    <p>或点击「+ 添加分镜」手动创建</p>
+                {/* 剧本摘要 */}
+                {generatedScript && (
+                  <div style={{ marginBottom: 20, padding: "10px 14px", borderRadius: 10, background: "rgba(250,197,117,0.05)", border: "1px solid rgba(250,197,117,0.12)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, color: "#fac775", fontWeight: 600 }}>《{generatedScript.title}》</span>
+                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{generatedScript.characters.map(c => c.name).join(" · ")}</span>
+                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>{generatedScript.scenes.length} 幕剧情</span>
+                    <span style={{ fontSize: 12, color: "rgba(168,85,247,0.7)" }}>{mangaStyle.label}</span>
                   </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
-                    {mangaScenes.map((scene, idx) => (
-                      <div key={scene.id} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${scene.status === "success" ? "rgba(74,222,128,0.25)" : scene.status === "failed" ? "rgba(248,113,113,0.25)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden" }}>
+                )}
 
-                        {/* 视频预览 or 占位 */}
-                        <div style={{ height: 140, background: "#0c0c14", position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          {scene.videoUrl ? (
-                            <video src={scene.videoUrl} controls style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                          ) : scene.status !== "idle" ? (
-                            <div style={{ textAlign: "center" }}>
-                              {["creating","queueing","processing"].includes(scene.status) && (
-                                <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid rgba(250,197,117,0.2)", borderTopColor: "#fac775", animation: "spin 0.8s linear infinite", margin: "0 auto 8px" }} />
-                              )}
-                              <span style={{ fontSize: 11, color: sceneStatusColor(scene.status) }}>{sceneStatusLabel(scene)}</span>
+                {isGeneratingStoryboard && (
+                  <div style={{ textAlign: "center", padding: 60 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", border: "2px solid rgba(168,85,247,0.15)", borderTopColor: "#a855f7", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+                    <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>正在解析剧本，生成详细分镜脚本…</p>
+                  </div>
+                )}
+
+                {storyboardPanels.length === 0 && !isGeneratingStoryboard && (
+                  <div style={{ textAlign: "center", padding: "60px 0", color: "rgba(255,255,255,0.15)", fontSize: 13 }}>
+                    <p style={{ fontSize: 32, marginBottom: 10 }}>🎞</p>
+                    <p>点击「智能分镜」，将剧本自动拆解为逐格分镜脚本</p>
+                  </div>
+                )}
+
+                {/* 分镜网格 */}
+                {storyboardPanels.length > 0 && (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>共 {storyboardPanels.length} 个分镜，可直接编辑</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                      {storyboardPanels.map((panel, idx) => (
+                        <div key={panel.id} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
+                          {/* Panel header */}
+                          <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                            <span style={{ width: 20, height: 20, borderRadius: 6, background: "rgba(168,85,247,0.2)", color: "#c084fc", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, flexShrink: 0 }}>{idx + 1}</span>
+                            <input value={panel.title} onChange={e => updatePanel(panel.id, { title: e.target.value })}
+                              style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontSize: 12, fontWeight: 600, color: "#e2e0f0", fontFamily: "inherit" }} />
+                            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", flexShrink: 0 }}>{panel.duration}s</span>
+                          </div>
+
+                          {/* Scene description */}
+                          <div style={{ padding: "10px 12px" }}>
+                            <textarea value={panel.sceneDescription} onChange={e => updatePanel(panel.id, { sceneDescription: e.target.value })}
+                              placeholder="画面内容描述…"
+                              style={{ width: "100%", height: 58, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 6, padding: "6px 8px", color: "#e2e0f0", fontSize: 11, lineHeight: 1.5, resize: "none", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} />
+
+                            {/* Meta row */}
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                              {[
+                                { label: "场景", key: "location", val: panel.location },
+                                { label: "镜头", key: "camera",   val: panel.camera },
+                                { label: "转场", key: "transition", val: panel.transition },
+                                { label: "情绪", key: "mood",     val: panel.mood },
+                              ].map(({ label, key, val }) => (
+                                <div key={key}>
+                                  <p style={{ margin: "0 0 2px", fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</p>
+                                  <input value={val} onChange={e => updatePanel(panel.id, { [key]: e.target.value } as any)}
+                                    style={{ width: "100%", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 5, padding: "4px 7px", color: "rgba(255,255,255,0.6)", fontSize: 11, outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+                                </div>
+                              ))}
                             </div>
-                          ) : (
-                            <span style={{ fontSize: 28, opacity: 0.1 }}>▶</span>
-                          )}
-                          {/* 分镜编号 */}
-                          <span style={{ position: "absolute", top: 6, left: 8, fontSize: 10, color: "rgba(255,255,255,0.3)", background: "rgba(0,0,0,0.5)", padding: "2px 6px", borderRadius: 4 }}>分镜 {idx + 1}</span>
-                          {/* 删除按钮 */}
-                          <button onClick={() => removeScene(scene.id)} disabled={mangaGenerating}
-                            style={{ position: "absolute", top: 5, right: 5, width: 18, height: 18, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "rgba(255,255,255,0.4)", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-                        </div>
 
-                        {/* 描述词编辑 */}
-                        <div style={{ padding: "8px 10px" }}>
-                          <textarea
-                            value={scene.prompt}
-                            onChange={e => updateScenePrompt(scene.id, e.target.value)}
-                            disabled={mangaGenerating}
-                            placeholder="描述这格分镜的画面内容…"
-                            style={{ width: "100%", height: 60, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 6, padding: "6px 8px", color: "#e2e0f0", fontSize: 11, lineHeight: 1.5, resize: "none", outline: "none", boxSizing: "border-box", fontFamily: "inherit" }}
-                          />
-                          {/* 单格操作 */}
-                          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                            {scene.status === "failed" && (
-                              <button onClick={() => retryScene(scene.id)}
-                                style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 11, cursor: "pointer" }}>
-                                重试
-                              </button>
-                            )}
-                            {scene.status === "success" && scene.videoUrl && (
-                              <a href={scene.videoUrl} download={`scene-${idx + 1}.mp4`}
-                                style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "1px solid rgba(74,222,128,0.25)", background: "rgba(74,222,128,0.06)", color: "#4ade80", fontSize: 11, textDecoration: "none", display: "block", textAlign: "center" }}>
-                                ↓ 下载
-                              </a>
-                            )}
+                            {/* Duration */}
+                            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                              <p style={{ margin: 0, fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.5px", flexShrink: 0 }}>时长(s)</p>
+                              <input type="number" min={3} max={8} value={panel.duration} onChange={e => updatePanel(panel.id, { duration: Number(e.target.value) })}
+                                style={{ width: 48, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 5, padding: "4px 7px", color: "rgba(255,255,255,0.6)", fontSize: 11, outline: "none", fontFamily: "inherit" }} />
+                              {panel.dialog && (
+                                <span style={{ flex: 1, fontSize: 10, color: "rgba(255,255,255,0.25)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>💬 {panel.dialog}</span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ════════════════════════════════════
+                STEP 3 — 角色与画风
+            ════════════════════════════════════ */}
+            {mangaStep === 3 && (
+              <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, gap: 16 }}>
+                  <div>
+                    <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700 }}>第三步：角色与画风</h2>
+                    <p style={{ margin: 0, fontSize: 13, color: "rgba(255,255,255,0.35)" }}>为每个角色生成一致性提示词和立绘图，并为每格分镜生成参考图</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button onClick={() => setMangaStep(2)} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>← 分镜</button>
+                    <button onClick={generateAllImages} disabled={isGeneratingAllImages}
+                      style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: !isGeneratingAllImages ? "rgba(168,85,247,0.2)" : "rgba(168,85,247,0.05)", color: !isGeneratingAllImages ? "#c084fc" : "rgba(255,255,255,0.2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      {isGeneratingAllImages ? "生成图片中…" : `⊞ 批量生成分镜图 (${imgDoneCount}/${storyboardPanels.length})`}
+                    </button>
+                    <button onClick={() => setMangaStep(4)} style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#EF9F27,#fac775)", color: "#0c0c14", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>一键成片 →</button>
+                  </div>
+                </div>
+
+                {/* Hidden file input for character image upload */}
+                <input ref={charUploadRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleCharImageUpload} />
+
+                {/* ── 角色区 ── */}
+                {generatedScript?.characters && generatedScript.characters.length > 0 && (
+                  <div style={{ marginBottom: 28 }}>
+                    <p style={{ ...PL, marginBottom: 10, fontSize: 12 }}>角色设定</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+                      {generatedScript.characters.map(char => {
+                        const asset = characterAssets[char.name] || { prompt: "", consistencyKey: "", imageUrl: "", isGeneratingPrompt: false, isGeneratingImage: false };
+                        return (
+                          <div key={char.name} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, overflow: "hidden" }}>
+                            <div style={{ display: "flex", gap: 0 }}>
+                              {/* 角色图（可点击上传） */}
+                              <div
+                                onClick={() => { if (!asset.isGeneratingImage) { setUploadingCharName(char.name); setTimeout(() => charUploadRef.current?.click(), 0); } }}
+                                title="点击上传本地图片"
+                                style={{ width: 90, flexShrink: 0, background: "#0c0c14", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", cursor: "pointer", overflow: "hidden" }}
+                              >
+                                {asset.imageUrl ? (
+                                  <img src={asset.imageUrl} alt={char.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                ) : asset.isGeneratingImage ? (
+                                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid rgba(250,197,117,0.15)", borderTopColor: "#fac775", animation: "spin 0.8s linear infinite" }} />
+                                ) : (
+                                  <span style={{ fontSize: 28, opacity: 0.1 }}>👤</span>
+                                )}
+                                {/* Upload hover overlay */}
+                                <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", opacity: 0, transition: "opacity 0.15s" }}
+                                  onMouseEnter={e => (e.currentTarget.style.opacity = "1")}
+                                  onMouseLeave={e => (e.currentTarget.style.opacity = "0")}>
+                                  <span style={{ fontSize: 18 }}>📁</span>
+                                  <span style={{ fontSize: 9, color: "rgba(255,255,255,0.7)", marginTop: 3 }}>上传图片</span>
+                                </div>
+                              </div>
+                              {/* 角色信息 */}
+                              <div style={{ flex: 1, padding: "12px 12px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600 }}>{char.name}</span>
+                                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.06)", padding: "1px 6px", borderRadius: 10 }}>{char.role}</span>
+                                </div>
+                                <p style={{ margin: "0 0 10px", fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.5 }}>{char.appearance}</p>
+                                {asset.prompt && (
+                                  <div style={{ marginBottom: 8, padding: "6px 8px", borderRadius: 6, background: "rgba(168,85,247,0.06)", border: "1px solid rgba(168,85,247,0.15)" }}>
+                                    <p style={{ margin: "0 0 3px", fontSize: 9, color: "#c084fc", textTransform: "uppercase", letterSpacing: "0.5px" }}>AI Prompt</p>
+                                    <p style={{ margin: 0, fontSize: 10, color: "rgba(255,255,255,0.4)", lineHeight: 1.5, wordBreak: "break-word" }}>{asset.prompt.slice(0, 100)}{asset.prompt.length > 100 ? "…" : ""}</p>
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button onClick={() => generateCharacterPrompt(char.name)} disabled={asset.isGeneratingPrompt}
+                                    style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "1px solid rgba(168,85,247,0.2)", background: "rgba(168,85,247,0.06)", color: "#c084fc", fontSize: 11, cursor: "pointer" }}>
+                                    {asset.isGeneratingPrompt ? "生成中…" : "✦ 生成提示词"}
+                                  </button>
+                                  <button onClick={() => generateCharacterImage(char.name)} disabled={!asset.prompt || asset.isGeneratingImage}
+                                    style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${asset.prompt ? "rgba(250,197,117,0.3)" : "rgba(255,255,255,0.05)"}`, background: asset.prompt ? "rgba(250,197,117,0.06)" : "transparent", color: asset.prompt ? "#fac775" : "rgba(255,255,255,0.15)", fontSize: 11, cursor: asset.prompt ? "pointer" : "not-allowed" }}>
+                                    {asset.isGeneratingImage ? "生成中…" : "⊞ 生成角色图"}
+                                  </button>
+                                </div>
+                                {asset.imageError && (
+                                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "#f87171", lineHeight: 1.4, wordBreak: "break-word" }}>⚠ {asset.imageError}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
-                {/* 进度汇总 */}
-                {mangaScenes.length > 0 && (
-                  <div style={{ marginTop: 20, padding: "10px 14px", borderRadius: 9, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", display: "flex", gap: 16, fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-                    <span>共 {mangaScenes.length} 个分镜</span>
-                    <span style={{ color: "#4ade80" }}>完成 {mangaScenes.filter(s => s.status === "success").length}</span>
-                    <span style={{ color: "#c084fc" }}>生成中 {mangaScenes.filter(s => ["creating","queueing","processing"].includes(s.status)).length}</span>
-                    <span style={{ color: "#f87171" }}>失败 {mangaScenes.filter(s => s.status === "failed").length}</span>
-                    <span style={{ marginLeft: "auto", color: "rgba(255,255,255,0.25)" }}>提示：生成完成后可逐个下载视频片段</span>
+                {/* ── 分镜图区 ── */}
+                <p style={{ ...PL, marginBottom: 10, fontSize: 12 }}>分镜参考图（{imgDoneCount}/{storyboardPanels.length} 已生成）</p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+                  {storyboardPanels.map((panel, idx) => (
+                    <div key={panel.id} style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${panel.imageStatus === "done" ? "rgba(74,222,128,0.2)" : panel.imageStatus === "error" ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.06)"}`, background: "rgba(0,0,0,0.3)" }}>
+                      {/* Image */}
+                      <div style={{ height: 130, background: "#0c0c14", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
+                        {panel.panelImageUrl ? (
+                          <img src={panel.panelImageUrl} alt={panel.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : panel.imageStatus === "generating" ? (
+                          <div style={{ textAlign: "center" }}>
+                            <div style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid rgba(250,197,117,0.15)", borderTopColor: "#fac775", animation: "spin 0.8s linear infinite", margin: "0 auto 6px" }} />
+                            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>生成中…</span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 24, opacity: 0.08 }}>🎨</span>
+                        )}
+                        <span style={{ position: "absolute", top: 5, left: 7, fontSize: 9, background: "rgba(0,0,0,0.6)", color: "rgba(255,255,255,0.4)", padding: "2px 5px", borderRadius: 4 }}>{idx + 1}</span>
+                        {/* Delete button */}
+                        <button onClick={() => deletePanel(panel.id)} disabled={isGeneratingAllImages}
+                          style={{ position: "absolute", top: 5, right: 5, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(248,113,113,0.7)", color: "#fff", fontSize: 11, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                          title="删除此分镜">×</button>
+                      </div>
+                      {/* Title + button */}
+                      <div style={{ padding: "7px 9px" }}>
+                        <p style={{ margin: "0 0 6px", fontSize: 11, color: "rgba(255,255,255,0.55)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{panel.title}</p>
+                        <button onClick={() => generatePanelImage(panel.id)} disabled={panel.imageStatus === "generating" || isGeneratingAllImages}
+                          style={{ width: "100%", padding: "5px 0", borderRadius: 6, border: `1px solid ${panel.imageStatus === "done" ? "rgba(74,222,128,0.25)" : "rgba(255,255,255,0.08)"}`, background: panel.imageStatus === "done" ? "rgba(74,222,128,0.06)" : "rgba(255,255,255,0.02)", color: panel.imageStatus === "done" ? "#4ade80" : "rgba(255,255,255,0.35)", fontSize: 10, cursor: "pointer" }}>
+                          {panel.imageStatus === "done" ? "✓ 已完成  重新生成" : panel.imageStatus === "generating" ? "生成中…" : panel.imageStatus === "error" ? "⚠ 重试" : "⊞ 生成分镜图"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ════════════════════════════════════
+                STEP 4 — 一键成片
+            ════════════════════════════════════ */}
+            {mangaStep === 4 && (
+              <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, gap: 16 }}>
+                  <div>
+                    <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700 }}>第四步：一键成片</h2>
+                    <p style={{ margin: 0, fontSize: 13, color: "rgba(255,255,255,0.35)" }}>AI 为每个分镜生成视频，竖屏 9:16 · 540p · 逐格生成</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                    <button onClick={() => setMangaStep(3)} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer" }}>← 角色画风</button>
+                    <button onClick={generateAllVideos} disabled={mangaGenerating || storyboardPanels.every(p => !p.sceneDescription.trim())}
+                      style={{ padding: "10px 24px", borderRadius: 10, border: "none", background: !mangaGenerating ? "linear-gradient(135deg,#EF9F27,#fac775)" : "rgba(250,197,117,0.1)", color: !mangaGenerating ? "#0c0c14" : "rgba(255,255,255,0.2)", fontSize: 14, fontWeight: 700, cursor: mangaGenerating ? "not-allowed" : "pointer", letterSpacing: "0.3px" }}>
+                      {mangaGenerating ? "▶ 生成中…" : "▶ 一键生成全集"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 进度统计 */}
+                <div style={{ marginBottom: 20, padding: "12px 16px", borderRadius: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12 }}>
+                  <span style={{ color: "rgba(255,255,255,0.3)" }}>共 {storyboardPanels.length} 格分镜</span>
+                  <span style={{ color: "#4ade80" }}>✓ 完成 {doneCount}</span>
+                  {runningCount > 0 && <span style={{ color: "#c084fc" }}>⟳ 生成中 {runningCount}</span>}
+                  {failCount   > 0 && <span style={{ color: "#f87171" }}>✕ 失败 {failCount}</span>}
+                  <span style={{ color: "rgba(255,255,255,0.15)", marginLeft: "auto" }}>
+                    {doneCount === storyboardPanels.length && storyboardPanels.length > 0 ? "🎉 全部完成，可逐个下载视频片段" : "每格依次生成，请耐心等待"}
+                  </span>
+                </div>
+
+                {/* 分镜视频格 */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+                  {storyboardPanels.map((panel, idx) => (
+                    <div key={panel.id} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${panel.videoStatus === "success" ? "rgba(74,222,128,0.25)" : panel.videoStatus === "failed" ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden" }}>
+
+                      {/* Video / Image / Placeholder */}
+                      <div style={{ height: 160, background: "#080810", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                        {panel.videoUrl ? (
+                          <video src={panel.videoUrl} controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : panel.panelImageUrl ? (
+                          <img src={panel.panelImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.5 }} />
+                        ) : (
+                          <span style={{ fontSize: 32, opacity: 0.06 }}>▶</span>
+                        )}
+                        {/* Status overlay */}
+                        {panel.videoStatus !== "idle" && panel.videoStatus !== "success" && (
+                          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.5)", gap: 8 }}>
+                            {["creating","queueing","processing"].includes(panel.videoStatus) && (
+                              <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid rgba(192,132,252,0.2)", borderTopColor: "#c084fc", animation: "spin 0.8s linear infinite" }} />
+                            )}
+                            <span style={{ fontSize: 11, color: videoStatusColor(panel.videoStatus) }}>{panelVideoLabel(panel)}</span>
+                            {panel.videoStatus === "processing" && (
+                              <div style={{ width: 100, height: 3, background: "rgba(255,255,255,0.1)", borderRadius: 4 }}>
+                                <div style={{ width: `${panel.videoProgress}%`, height: "100%", background: "#c084fc", borderRadius: 4, transition: "width 0.5s" }} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <span style={{ position: "absolute", top: 6, left: 8, fontSize: 10, background: "rgba(0,0,0,0.7)", color: "rgba(255,255,255,0.4)", padding: "2px 6px", borderRadius: 4 }}>
+                          {idx + 1} · {panel.title}
+                        </span>
+                        {panel.videoStatus === "success" ? (
+                          <span style={{ position: "absolute", top: 6, right: 8, fontSize: 10, background: "rgba(74,222,128,0.15)", color: "#4ade80", padding: "2px 6px", borderRadius: 4 }}>✓ 完成</span>
+                        ) : (
+                          <button onClick={() => deletePanel(panel.id)} disabled={mangaGenerating}
+                            style={{ position: "absolute", top: 6, right: 8, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(248,113,113,0.7)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                            title="删除此分镜">×</button>
+                        )}
+                      </div>
+
+                      {/* Scene info */}
+                      <div style={{ padding: "8px 10px" }}>
+                        <p style={{ margin: "0 0 6px", fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                          {panel.sceneDescription || "—"}
+                        </p>
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 7 }}>
+                          {panel.location && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.04)", padding: "1px 6px", borderRadius: 4 }}>{panel.location}</span>}
+                          {panel.camera &&   <span style={{ fontSize: 10, color: "rgba(168,85,247,0.5)", background: "rgba(168,85,247,0.06)", padding: "1px 6px", borderRadius: 4 }}>{panel.camera}</span>}
+                          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)", padding: "1px 6px", borderRadius: 4 }}>{panel.duration}s</span>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div style={{ display: "flex", gap: 5 }}>
+                          {panel.videoStatus === "failed" ? (
+                            <button onClick={() => generatePanelVideo(panel.id)} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#f87171", fontSize: 11, cursor: "pointer" }}>重试</button>
+                          ) : panel.videoStatus !== "success" ? (
+                            <button onClick={() => generatePanelVideo(panel.id)} disabled={mangaGenerating || ["creating","queueing","processing"].includes(panel.videoStatus)}
+                              style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "1px solid rgba(250,197,117,0.2)", background: "rgba(250,197,117,0.05)", color: "rgba(250,197,117,0.7)", fontSize: 11, cursor: "pointer" }}>生成视频</button>
+                          ) : (
+                            <a href={panel.videoUrl} download={`scene-${String(idx + 1).padStart(2, "0")}.mp4`}
+                              style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "1px solid rgba(74,222,128,0.25)", background: "rgba(74,222,128,0.06)", color: "#4ade80", fontSize: 11, textDecoration: "none", display: "block", textAlign: "center" }}>↓ 下载</a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* All done banner */}
+                {doneCount > 0 && doneCount === storyboardPanels.length && (
+                  <div style={{ marginTop: 24, padding: "16px 20px", borderRadius: 12, background: "linear-gradient(135deg, rgba(74,222,128,0.08), rgba(34,197,94,0.04))", border: "1px solid rgba(74,222,128,0.2)", textAlign: "center" }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 15, fontWeight: 600, color: "#4ade80" }}>🎉 {storyboardPanels.length} 格分镜全部生成完毕</p>
+                    <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.35)" }}>逐个下载视频片段，用剪映或 CapCut 按顺序拼接，即可得到完整漫剧</p>
                   </div>
                 )}
               </div>
@@ -766,9 +1229,9 @@ export default function Home() {
         </div>
 
       ) : (
-        /* ═══════════════════════════════════════════════════════════════════
+        /* ═══════════════════════════════════════════════════════════════
             普通模式（原有界面，完全保留）
-        ═══════════════════════════════════════════════════════════════════ */
+        ═══════════════════════════════════════════════════════════════ */
         <>
           {/* ── LEFT PANEL ── */}
           <div style={{ width: 420, borderRight: "1px solid rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
@@ -869,9 +1332,7 @@ export default function Home() {
                   <div style={{ marginBottom: 14 }}>
                     <p style={PL}>时长 <span style={{ color: "#c084fc", fontWeight: 500 }}>{duration}s</span></p>
                     <input type="range" min={1} max={15} step={1} value={duration} onChange={e => setDuration(Number(e.target.value))} style={{ width: "100%", accentColor: "#a855f7" }} />
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 2 }}>
-                      <span>1s</span><span>8s</span><span>15s</span>
-                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 2 }}><span>1s</span><span>8s</span><span>15s</span></div>
                   </div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <div style={{ flex: 1 }}>
@@ -968,7 +1429,7 @@ export default function Home() {
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
-        textarea:focus { border-color: rgba(168,85,247,0.35) !important; }
+        textarea:focus, input:focus { border-color: rgba(168,85,247,0.35) !important; }
         button:hover:not(:disabled) { opacity: 0.85; }
       `}</style>
     </div>
