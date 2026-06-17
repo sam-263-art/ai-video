@@ -141,11 +141,8 @@ export default function Home() {
   const [isExtending, setIsExtending]       = useState(false);
 
   // ── 漫剧模式 state ──────────────────────────────────────────────────────
-  // ★ 修复 Hydration 错误：初始值必须固定，不能在 useState 里读 localStorage
-  //   （服务端没有 localStorage，会导致服务端渲染和客户端渲染结果不一致）
-  //   真正的本地存储数据改为在下方 useEffect 里 mount 后才读取
   const [isMangaMode, setIsMangaMode]       = useState(false);
-  const [mangaStep, setMangaStep]           = useState(1);
+  const [mangaStep, setMangaStep]           = useState(1);  // 1-4
   const [mangaStyle, setMangaStyle]         = useState(MANGA_STYLES[0]);
   const [mangaGenre, setMangaGenre]         = useState("都市言情");
 
@@ -169,9 +166,6 @@ export default function Home() {
   // Step 4 – Video
   const [mangaGenerating, setMangaGenerating]   = useState(false);
 
-  // 图片预览放大
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
   const firstFrameRef = useRef<HTMLInputElement>(null);
   const lastFrameRef  = useRef<HTMLInputElement>(null);
 
@@ -181,45 +175,6 @@ export default function Home() {
   // ★ 同样缓存 characterAssets，generatePanelImage 异步过程中读最新值
   const characterAssetsRef = useRef(characterAssets);
   useEffect(() => { characterAssetsRef.current = characterAssets; }, [characterAssets]);
-
-  // ★ Hydration 修复：只在客户端 mount 完成后才读取 localStorage 并应用
-  //   首次渲染（SSR + 客户端首帧）都用上面的固定默认值，两端一致，不会报错
-  //   mount 之后这个 effect 才跑，把本地存储的数据"补"进 state
-  const [isHydrated, setIsHydrated] = useState(false);
-  useEffect(() => {
-    try {
-      const savedIsMangaMode = localStorage.getItem("manga_isMangaMode");
-      if (savedIsMangaMode) setIsMangaMode(JSON.parse(savedIsMangaMode));
-      const savedStep = localStorage.getItem("manga_step");
-      if (savedStep) setMangaStep(JSON.parse(savedStep));
-      const savedStyle = localStorage.getItem("manga_style");
-      if (savedStyle) setMangaStyle(JSON.parse(savedStyle));
-      const savedGenre = localStorage.getItem("manga_genre");
-      if (savedGenre) setMangaGenre(savedGenre);
-      const savedPlot = localStorage.getItem("manga_plotInput");
-      if (savedPlot) setMangaPlotInput(savedPlot);
-      const savedScript = localStorage.getItem("manga_script");
-      if (savedScript) setGeneratedScript(JSON.parse(savedScript));
-      const savedPanels = localStorage.getItem("manga_panels");
-      if (savedPanels) setStoryboardPanels(JSON.parse(savedPanels));
-      const savedAssets = localStorage.getItem("manga_charAssets");
-      if (savedAssets) setCharacterAssets(JSON.parse(savedAssets));
-    } catch (e) {
-      console.error("读取本地存储失败:", e);
-    } finally {
-      setIsHydrated(true);  // 标记 hydrate 完成，下面的写入 effect 才开始生效
-    }
-  }, []);
-
-  // ★ localStorage 持久化：关键数据变化时写入（isHydrated 之前不写，避免用默认值覆盖已保存的数据）
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_isMangaMode", JSON.stringify(isMangaMode)); } catch {} }, [isMangaMode, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_step", JSON.stringify(mangaStep)); } catch {} }, [mangaStep, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_style", JSON.stringify(mangaStyle)); } catch {} }, [mangaStyle, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_genre", mangaGenre); } catch {} }, [mangaGenre, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_plotInput", mangaPlotInput); } catch {} }, [mangaPlotInput, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_script", JSON.stringify(generatedScript)); } catch {} }, [generatedScript, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_panels", JSON.stringify(storyboardPanels)); } catch {} }, [storyboardPanels, isHydrated]);
-  useEffect(() => { if (isHydrated) try { localStorage.setItem("manga_charAssets", JSON.stringify(characterAssets)); } catch {} }, [characterAssets, isHydrated]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const currentMode    = MODES.find(m => m.value === frameMode)!;
@@ -460,10 +415,7 @@ export default function Home() {
         setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingImage: false, imageError: "未返回图片，请检查 API Key 配置" } }));
         return;
       }
-      // 把 http URL 转为 base64 存储，避免跨域导致 <img> 无法显示
-      const imageUrl = data.imageUrl;
-      const base64Url = imageUrl.startsWith("data:") ? imageUrl : (await urlToBase64(imageUrl)) ?? imageUrl;
-      setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], imageUrl: base64Url, isGeneratingImage: false, imageError: "" } }));
+      setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], imageUrl: data.imageUrl, isGeneratingImage: false, imageError: "" } }));
     } catch (e: any) {
       setCharacterAssets(prev => ({ ...prev, [charName]: { ...prev[charName], isGeneratingImage: false, imageError: e.message || "网络请求失败，请重试" } }));
     }
@@ -585,14 +537,10 @@ export default function Home() {
         updatePanel(panelId, { imageStatus: "error", errorMsg: data.error });
         return;
       }
-      // ★ 把临时图片 URL 转成 base64 再存储
-      //   SiliconFlow/FLUX 返回的图片 URL 是临时签名链接，几分钟到几十分钟后会过期 403
-      //   data:URL（SVG 占位符）已经是 base64，无需再转
-      const rawUrl = data.imageUrl || "";
-      const persistedUrl = rawUrl.startsWith("data:") ? rawUrl : (await urlToBase64(rawUrl)) ?? rawUrl;
+      // SVG 占位符也正常存储并显示（渲染层会区分真实图和占位）
       updatePanel(panelId, {
-        panelImageUrl: persistedUrl,
-        imageStatus: persistedUrl ? "done" : "error",
+        panelImageUrl: data.imageUrl || "",
+        imageStatus: data.imageUrl ? "done" : "error",
       });
     } catch (e: any) {
       updatePanel(panelId, { imageStatus: "error", errorMsg: e.message || "请求失败" });
@@ -865,15 +813,9 @@ export default function Home() {
               })}
             </div>
             {/* Style + Genre quick display */}
-            <div style={{ display: "flex", gap: 6, flexShrink: 0, marginLeft: 16, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0, marginLeft: 16 }}>
               <span style={{ padding: "3px 9px", borderRadius: 20, background: "rgba(168,85,247,0.12)", border: "1px solid rgba(168,85,247,0.2)", color: "#c084fc", fontSize: 11 }}>{mangaStyle.label}</span>
               <span style={{ padding: "3px 9px", borderRadius: 20, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.35)", fontSize: 11 }}>{mangaGenre}</span>
-              <button onClick={() => {
-                if (!confirm("清除所有漫剧数据并重新开始？")) return;
-                ["manga_isMangaMode","manga_step","manga_style","manga_genre","manga_plotInput","manga_script","manga_panels","manga_charAssets"].forEach(k => localStorage.removeItem(k));
-                setGeneratedScript(null); setStoryboardPanels([]); setCharacterAssets({});
-                setMangaPlotInput(""); setMangaStep(1); setScriptError("");
-              }} style={{ padding: "3px 9px", borderRadius: 20, border: "1px solid rgba(248,113,113,0.25)", background: "rgba(248,113,113,0.06)", color: "rgba(248,113,113,0.6)", fontSize: 11, cursor: "pointer" }}>↺ 清除重置</button>
             </div>
           </div>
 
@@ -1155,13 +1097,7 @@ export default function Home() {
                                 {/* 标签 */}
                                 <div style={{ position: "absolute", top: 8, left: 8, zIndex: 2, fontSize: 9, color: "rgba(255,255,255,0.5)", background: "rgba(0,0,0,0.5)", padding: "2px 7px", borderRadius: 4, letterSpacing: "0.5px" }}>立绘</div>
                                 <div
-                                  onClick={() => {
-                                    if (asset.imageUrl) {
-                                      setPreviewUrl(asset.imageUrl);
-                                    } else {
-                                      setUploadingCharName(char.name); setUploadingCharField("portrait"); setTimeout(() => charUploadRef.current?.click(), 0);
-                                    }
-                                  }}
+                                  onClick={() => { setUploadingCharName(char.name); setUploadingCharField("portrait"); setTimeout(() => charUploadRef.current?.click(), 0); }}
                                   style={{ height: 200, background: "#0a0a14", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", position: "relative", overflow: "hidden" }}
                                 >
                                   {asset.imageUrl ? (
@@ -1180,21 +1116,8 @@ export default function Home() {
                                   <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, opacity: 0, transition: "opacity 0.15s" }}
                                     onMouseEnter={e => (e.currentTarget.style.opacity = "1")}
                                     onMouseLeave={e => (e.currentTarget.style.opacity = "0")}>
-                                    {asset.imageUrl ? (
-                                      <>
-                                        <span style={{ fontSize: 20 }}>🔍</span>
-                                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)" }}>点击预览</span>
-                                        <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 2 }}
-                                          onClick={e => { e.stopPropagation(); setUploadingCharName(char.name); setUploadingCharField("portrait"); setTimeout(() => charUploadRef.current?.click(), 0); }}>
-                                          📁 替换
-                                        </span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span style={{ fontSize: 20 }}>📁</span>
-                                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)" }}>上传立绘</span>
-                                      </>
-                                    )}
+                                    <span style={{ fontSize: 20 }}>📁</span>
+                                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)" }}>上传立绘</span>
                                   </div>
                                 </div>
                               </div>
@@ -1276,10 +1199,8 @@ export default function Home() {
                       {/* Image area */}
                       <div style={{ height: 130, background: "#0c0c14", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
                         {hasRealImage ? (
-                          // 真实图片（立绘引用 or API 生成）—— 点击放大预览
-                          <img src={panel.panelImageUrl} alt={panel.title}
-                            onClick={() => setPreviewUrl(panel.panelImageUrl)}
-                            style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in" }} />
+                          // 真实图片（立绘引用 or API 生成）
+                          <img src={panel.panelImageUrl} alt={panel.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         ) : isSvgPlaceholder ? (
                           // SVG 占位符：显示 prompt 文字卡
                           <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "8px 10px", boxSizing: "border-box", background: "linear-gradient(135deg,#13131f,#0c0c1a)" }}>
@@ -1655,25 +1576,6 @@ export default function Home() {
             </div>
           </div>
         </>
-      )}
-
-      {/* ── 全屏图片预览蒙层 ── */}
-      {previewUrl && (
-        <div
-          onClick={() => setPreviewUrl(null)}
-          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }}
-        >
-          <img
-            src={previewUrl}
-            alt="预览"
-            style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 12, boxShadow: "0 0 60px rgba(0,0,0,0.8)" }}
-            onClick={e => e.stopPropagation()}
-          />
-          <button
-            onClick={() => setPreviewUrl(null)}
-            style={{ position: "absolute", top: 20, right: 24, width: 36, height: 36, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.12)", color: "#fff", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-          >×</button>
-        </div>
       )}
 
       <style>{`

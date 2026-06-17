@@ -28,57 +28,6 @@ function extractJson(raw: string): string {
     .trim();
 }
 
-/**
- * 内容安全过滤：递归检查并替换敏感词
- */
-function filterSensitiveContent(obj: any): any {
-  const sensitiveWords = [
-    '杀', '死', '血', '武器', '枪', '刀', '暴力', '恐怖', 
-    '色情', '血腥', '搏斗', '攻击', '尸体', '谋杀', '凶杀',
-    '砍', '刺', '捅', '爆炸', '焚烧', '虐待'
-  ];
-  
-  const replacements: Record<string, string> = {
-    '杀': '对抗',
-    '死': '沉睡',
-    '血': '红色',
-    '武器': '道具',
-    '枪': '工具',
-    '刀': '物品',
-    '暴力': '冲突',
-    '恐怖': '紧张',
-    '血腥': '激烈',
-    '搏斗': '对峙',
-    '攻击': '表达',
-    '尸体': '身影',
-    '谋杀': '误会',
-    '凶杀': '矛盾',
-    '砍': '挥舞',
-    '刺': '指向',
-    '捅': '触碰',
-    '爆炸': '绽放',
-    '焚烧': '燃烧',
-    '虐待': '对待'
-  };
-
-  if (typeof obj === 'string') {
-    let result = obj;
-    for (const [word, replacement] of Object.entries(replacements)) {
-      result = result.replace(new RegExp(word, 'g'), replacement);
-    }
-    return result;
-  } else if (Array.isArray(obj)) {
-    return obj.map(item => filterSensitiveContent(item));
-  } else if (obj && typeof obj === 'object') {
-    const newObj: any = {};
-    for (const key in obj) {
-      newObj[key] = filterSensitiveContent(obj[key]);
-    }
-    return newObj;
-  }
-  return obj;
-}
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -103,8 +52,7 @@ export async function POST(req: Request) {
       case "enhance":
       case "general":
         systemPrompt = `你是一个AI视频生成提示词专家。将用户的简短描述扩展为详细的视频生成提示词。
-要求：加入镜头语言、光影描述、画面质量词、风格描述。只输出扩展后的提示词，不要任何解释。
-⚠️ 安全要求：内容必须健康积极，禁止任何暴力、血腥、恐怖、色情、政治敏感元素。`;
+要求：加入镜头语言、光影描述、画面质量词、风格描述。只输出扩展后的提示词，不要任何解释。`;
         userContent = `用户输入：${prompt}\n扩展后：`;
         break;
 
@@ -116,8 +64,7 @@ export async function POST(req: Request) {
 - 每个分镜描述包含：角色动作、镜头角度（如：特写/中景/全景/俯拍/仰拍）、光线氛围
 - 保持角色外貌描述一致，每个分镜都要重复角色的外观特征
 - 描述词用中文，简洁有画面感，40字以内一个分镜
-- 分镜之间要有连续性，形成完整的一幕
-⚠️ 安全要求：禁止出现暴力、血腥、武器、恐怖元素，用情绪表达代替肢体冲突`;
+- 分镜之间要有连续性，形成完整的一幕`;
         userContent = `剧情描述：${prompt}\n\n请输出3个连续分镜描述词，用 ||| 分隔：`;
         break;
 
@@ -127,15 +74,6 @@ export async function POST(req: Request) {
         parseJson = true;
         maxTokens = 2000;
         systemPrompt = `你是一位专业漫剧编剧。将用户的剧情创意，扩展为完整的漫剧剧本。
-
-⚠️ 安全合规要求（必须严格遵守）：
-- 禁止出现：暴力、血腥、恐怖、色情、政治敏感、惊悚场面
-- 禁止出现：武器、刀具、枪支、流血、死亡、尸体
-- 禁止出现：宗教符号、政治人物、历史敏感事件
-- 情感冲突用：语言对峙、心理活动、社交矛盾代替肢体冲突
-- 激烈场面用：情绪爆发（流泪、沉默、转身离开）代替暴力动作
-- 场景设定在：都市生活、校园青春、家庭情感、职场故事、奇幻冒险（无暴力）
-- 所有冲突必须通过语言和心理活动表达，禁止任何物理伤害描写
 
 严格只输出合法JSON对象，不要任何解释、不要markdown符号、不要代码块标记：
 {
@@ -172,13 +110,6 @@ export async function POST(req: Request) {
         const scriptStr = typeof script === "string" ? script : JSON.stringify(script, null, 2);
         systemPrompt = `你是一位专业漫剧分镜导演。将剧本解析为详细的分镜脚本。
 
-⚠️ 安全合规要求（必须严格遵守）：
-- 所有画面描述必须符合Vidu平台内容审核标准
-- 禁止出现：流血、伤口、打斗接触、武器、恐怖氛围、惊悚元素
-- 激烈情绪用：面部特写（流泪、惊讶、愤怒表情）、手部动作（握紧、松开）代替
-- 场景转换用：环境变化（天气、光线、时间流逝）代替暴力转场
-- 氛围营造用：光影变化、色彩情绪、音乐暗示代替恐怖惊悚元素
-
 严格只输出合法JSON对象，不要任何解释、不要markdown符号、不要代码块标记：
 {
   "panels": [
@@ -200,9 +131,8 @@ export async function POST(req: Request) {
 - 每个剧情场景生成2-3个分镜，共10-15个分镜
 - 镜头语言要有变化（特写/中景/全景/俯仰拍交替）
 - 时长3-8秒/分镜（关键情绪镜头可适当加长）
-- 转场配合情绪节奏
-- 画面描述要具体可视化，便于AI生成
-- 所有视觉元素必须安全合规，符合主流内容平台标准`;
+- 转场配合情绪节奏（激烈场景用硬切，温情场面用溶解）
+- 画面描述要具体可视化，便于AI生成`;
         userContent = `剧本内容：\n${scriptStr}\n\n画风：${style}\n\n请生成详细分镜脚本JSON：`;
         break;
       }
@@ -212,26 +142,15 @@ export async function POST(req: Request) {
         maxTokens = 800;
         systemPrompt = `你是专业漫剧分镜提示词工程师，精通中英双语AI生成。根据分镜脚本生成提示词。
 
-⚠️ 安全合规要求（必须严格遵守）：
-- videoPrompt必须确保Vidu平台审核通过
-- 禁止出现任何暴力、血腥、政治、色情相关词汇
-- 用"情绪表达"代替"暴力冲突"，用"对话"代替"打斗"
-- 所有动态描述必须温和、艺术化
-- 画面内容必须健康积极向上
-
 严格只输出合法JSON对象，不要任何解释、不要markdown符号：
 {
   "characterPrompt": "（英文）角色在该分镜中的外观：姿势、表情、服装、动作",
   "scenePrompt": "（英文）背景环境：地点、光线、氛围、道具",
-  "panelImagePrompt": "（英文）完整分镜图片生成提示词，结合角色+场景+构图，必须包含：${styleDesc}, high quality illustration, safe content, family friendly",
-  "videoPrompt": "（中文）视频生成提示词：描述画面动态、镜头运动、角色行为和情绪，包含${style}风格，流畅动画，电影质感。如有对白必须用中文写入。此字段必须全程用中文。确保内容健康积极向上。"
+  "panelImagePrompt": "（英文）完整分镜图片生成提示词，结合角色+场景+构图，必须包含：${styleDesc}, high quality illustration",
+  "videoPrompt": "（中文）视频生成提示词：描述画面动态、镜头运动、角色行为和情绪，包含${style}风格，流畅动画，电影质感。如有对白必须用中文写入。此字段必须全程用中文。"
 }
 
-规则：
-- panelImagePrompt 英文输出（提升图片质量）
-- videoPrompt 必须中文输出（保证Vidu生成中文配音）
-- 内容必须完全符合平台安全标准
-- 所有描述必须温和、艺术化、无任何攻击性`;
+规则：panelImagePrompt 英文输出（提升图片质量）；videoPrompt 必须中文输出（保证Vidu生成中文配音）。`;
         userContent = `分镜内容：\n${panels || prompt}\n\n主要角色：${character || "如分镜所述"}\n画风：${style}\n\n请生成提示词JSON：`;
         break;
 
@@ -241,11 +160,9 @@ export async function POST(req: Request) {
         systemPrompt = `You are an expert at writing prompts for AI character concept art generation.
 
 Given a character description, generate detailed English prompts.
-⚠️ Safety requirement: All characters must be portrayed in a safe, non-violent, non-suggestive manner.
-
 Output ONLY a valid JSON object (no markdown, no explanation, no code blocks):
 {
-  "imagePrompt": "Detailed character concept art prompt: pose (standing/front-facing for reference), appearance details, clothing, expression, style. Include: ${styleDesc}, character design sheet, clean background, high quality illustration, safe content",
+  "imagePrompt": "Detailed character concept art prompt: pose (standing/front-facing for reference), appearance details, clothing, expression, style. Include: ${styleDesc}, character design sheet, clean background, high quality illustration",
   "consistencyKey": "A short 5-10 word phrase capturing the most distinctive visual features of this character"
 }`;
         userContent = `Character: ${prompt}\nArt style: ${style}`;
@@ -292,10 +209,7 @@ Output ONLY a valid JSON object (no markdown, no explanation, no code blocks):
     if (parseJson) {
       const cleaned = extractJson(rawText);
       try {
-        const parsed = JSON.parse(cleaned);
-        // 应用内容安全过滤
-        const safeParsed = filterSensitiveContent(parsed);
-        return NextResponse.json(safeParsed);
+        return NextResponse.json(JSON.parse(cleaned));
       } catch {
         console.error("[enhance] JSON parse failed. Raw output:", rawText);
         return NextResponse.json({ error: "AI返回格式异常，请重试", raw: cleaned }, { status: 500 });
@@ -310,15 +224,10 @@ Output ONLY a valid JSON object (no markdown, no explanation, no code blocks):
         .filter(Boolean)
         .slice(0, 3);
       while (scenes.length < 3) scenes.push(prompt);
-      // 对每个场景进行安全过滤
-      const safeScenes = scenes.map(s => filterSensitiveContent(s));
-      return NextResponse.json({ scenes: safeScenes });
+      return NextResponse.json({ scenes });
     }
 
-    // ── general / enhance: filter and return ────────────────────────────
-    const enhanced = rawText || prompt;
-    const safeEnhanced = filterSensitiveContent(enhanced);
-    return NextResponse.json({ enhanced: safeEnhanced });
+    return NextResponse.json({ enhanced: rawText || prompt });
 
   } catch (error: any) {
     console.error("[enhance] Unexpected error:", error);
